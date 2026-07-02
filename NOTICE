@@ -1,0 +1,30 @@
+thai-nlp-go
+Copyright 2026 sukitss
+
+This product includes software ported from PyThaiNLP.
+
+================================================================================
+PyThaiNLP  —  https://github.com/PyThaiNLP/pythainlp
+Copyright (C) PyThaiNLP Project
+Licensed under the Apache License, Version 2.0.
+
+The tokenization algorithm in this library is a Go port of PyThaiNLP's:
+  - pythainlp/tokenize/newmm.py   (maximal-matching word tokenizer)
+  - pythainlp/tokenize/tcc_p.py   (Thai Character Cluster segmentation)
+  - pythainlp/util/trie.py        (dictionary trie)
+
+Changes from the original: the algorithm was reimplemented in Go; the TCC
+look-ahead regexes were hand-coded as zero-allocation matchers (a regexp2-based
+oracle in the test suite verifies exact equivalence); the dictionary is stored
+as a flat, memory-mappable trie for near-instant loading.
+================================================================================
+Bundled dictionary: data/words_th.txt (and its compiled form words_th.fdt)
+Source: PyThaiNLP corpus (https://github.com/PyThaiNLP/pythainlp-corpus)
+Released by the PyThaiNLP project under the Creative Commons Zero 1.0 Universal
+Public Domain Dedication (CC0-1.0):
+  https://creativecommons.org/publicdomain/zero/1.0/
+================================================================================
+
+With gratitude to the PyThaiNLP maintainers and contributors for their work on
+Thai NLP, released openly for everyone. This port is offered back in the same
+spirit.

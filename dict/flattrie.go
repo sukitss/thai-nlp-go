@@ -1,0 +1,236 @@
+package dict
+
+// FlatTrie — a flat (CSR) serialization of the dictionary trie that loads in
+// microseconds via mmap + zero-copy cast (vs tens of ms to rebuild a pointer
+// trie). This is what makes cold-start cheap enough to spawn many workers.
+//
+// Build it once offline with BuildFlatFromTrie, then load with OpenFlat (mmap),
+// ReadFlat (eager) or FromBytes (e.g. go:embed). Lookups are rune-native so the
+// output is identical to the pointer Trie.
+
+import (
+	"encoding/binary"
+	"fmt"
+	"os"
+	"sort"
+	"unsafe"
+
+	mmap "github.com/blevesearch/mmap-go"
+)
+
+// File layout (little-endian, every section 4-byte aligned):
+//
+//	[0]  magic uint32 | numNodes uint32 | numEdges uint32 | reserved uint32
+//	edgeStart [numNodes+1] uint32   (CSR offsets into the edge arrays)
+//	endBits   [ceil(numNodes/32)] uint32  (bitset: node terminates a word)
+//	edgeRune  [numEdges] int32      (edge rune, sorted per node)
+//	edgeTgt   [numEdges] uint32     (target node)
+//	node 0 = root
+const flatMagic uint32 = 0x4E4D4654 // "NMFT"
+
+// FlatTrie is a read-only, memory-mapped dictionary. Safe for concurrent reads.
+type FlatTrie struct {
+	data      mmap.MMap // mmap region (retained to prevent GC/unmap)
+	keep      []uint64  // eager/embedded buffer (retained to prevent GC)
+	edgeStart []uint32
+	endBits   []uint32
+	edgeRune  []int32
+	edgeTgt   []uint32
+}
+
+func (f *FlatTrie) isEnd(node uint32) bool {
+	return f.endBits[node>>5]&(1<<(node&31)) != 0
+}
+
+// PrefixLens appends the rune-lengths of every dictionary word that is a prefix
+// of text[start:], in ascending order. out is reset before use. See
+// Trie.PrefixLens for the contract — the two are interchangeable.
+func (f *FlatTrie) PrefixLens(text []rune, start int, out []int) []int {
+	out = out[:0]
+	var cur uint32 // root
+	n := len(text)
+	for i := start; i < n; i++ {
+		lo, hi := f.edgeStart[cur], f.edgeStart[cur+1]
+		r := int32(text[i])
+		found := false
+		for lo < hi { // binary search (children sorted by rune)
+			mid := (lo + hi) >> 1
+			v := f.edgeRune[mid]
+			if v == r {
+				cur = f.edgeTgt[mid]
+				found = true
+				break
+			} else if v < r {
+				lo = mid + 1
+			} else {
+				hi = mid
+			}
+		}
+		if !found {
+			break
+		}
+		if f.isEnd(cur) {
+			out = append(out, i+1-start)
+		}
+	}
+	return out
+}
+
+// Close releases the mmap region, if any. Safe to call on non-mmap tries.
+func (f *FlatTrie) Close() error {
+	if f.data != nil {
+		err := f.data.Unmap()
+		f.data = nil
+		return err
+	}
+	return nil
+}
+
+// ---------- build (offline, once) ----------
+
+// BuildFlatFromTrie converts a pointer Trie into the flat CSR format and writes
+// it to path. Run this whenever the dictionary text changes.
+func BuildFlatFromTrie(t *Trie, path string) error {
+	// BFS to assign a stable node index to every trie node.
+	idx := map[*trieNode]uint32{t.root: 0}
+	order := []*trieNode{t.root}
+	for i := 0; i < len(order); i++ {
+		nd := order[i]
+		for _, r := range sortedRunes(nd) {
+			c := nd.children[r]
+			if _, ok := idx[c]; !ok {
+				idx[c] = uint32(len(order))
+				order = append(order, c)
+			}
+		}
+	}
+	numNodes := len(order)
+	edgeStart := make([]uint32, numNodes+1)
+	var edgeRune []int32
+	var edgeTgt []uint32
+	endBits := make([]uint32, (numNodes+31)/32)
+	for i, nd := range order {
+		edgeStart[i] = uint32(len(edgeRune))
+		if nd.end {
+			endBits[i>>5] |= 1 << (uint(i) & 31)
+		}
+		for _, r := range sortedRunes(nd) {
+			edgeRune = append(edgeRune, int32(r))
+			edgeTgt = append(edgeTgt, idx[nd.children[r]])
+		}
+	}
+	edgeStart[numNodes] = uint32(len(edgeRune))
+
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	bw := binary.Write
+	if err := bw(f, binary.LittleEndian, []uint32{flatMagic, uint32(numNodes), uint32(len(edgeRune)), 0}); err != nil {
+		return err
+	}
+	for _, section := range []any{edgeStart, endBits, edgeRune, edgeTgt} {
+		if err := bw(f, binary.LittleEndian, section); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sortedRunes(nd *trieNode) []rune {
+	runes := make([]rune, 0, len(nd.children))
+	for r := range nd.children {
+		runes = append(runes, r)
+	}
+	sort.Slice(runes, func(a, b int) bool { return runes[a] < runes[b] })
+	return runes
+}
+
+// ---------- load ----------
+
+// OpenFlat memory-maps a flat trie file. Fastest load; the returned FlatTrie
+// holds the mmap open until Close is called.
+func OpenFlat(path string) (*FlatTrie, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := mmap.Map(f, mmap.RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	ft, err := parseFlat(data)
+	if err != nil {
+		_ = data.Unmap()
+		return nil, err
+	}
+	ft.data = data
+	return ft, nil
+}
+
+// ReadFlat reads a flat trie file fully into memory (no mmap).
+func ReadFlat(path string) (*FlatTrie, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return FromBytes(data)
+}
+
+// FromBytes builds a FlatTrie from raw bytes, e.g. a go:embed'd dictionary.
+// The bytes are copied into an 8-byte-aligned buffer first, because the unsafe
+// zero-copy casts require alignment that an arbitrary/embedded slice does not
+// guarantee. The input may be reused or freed after the call returns.
+func FromBytes(data []byte) (*FlatTrie, error) {
+	n := len(data)
+	if n == 0 {
+		return nil, fmt.Errorf("newmm: empty flat trie data")
+	}
+	buf64 := make([]uint64, (n+7)/8) // allocating as []uint64 guarantees 8-byte alignment
+	buf := unsafe.Slice((*byte)(unsafe.Pointer(&buf64[0])), n)
+	copy(buf, data)
+	ft, err := parseFlat(buf)
+	if err != nil {
+		return nil, err
+	}
+	ft.keep = buf64
+	return ft, nil
+}
+
+// parseFlat maps the CSR sections onto data (must be 4-byte aligned) zero-copy.
+func parseFlat(data []byte) (*FlatTrie, error) {
+	if len(data) < 16 || u32(data, 0) != flatMagic {
+		return nil, fmt.Errorf("newmm: bad flat trie file (magic mismatch)")
+	}
+	numNodes := int(u32(data, 4))
+	numEdges := int(u32(data, 8))
+	off := 16
+	ft := &FlatTrie{}
+	ft.edgeStart = castU32(data, off, numNodes+1)
+	off += 4 * (numNodes + 1)
+	nbits := (numNodes + 31) / 32
+	ft.endBits = castU32(data, off, nbits)
+	off += 4 * nbits
+	ft.edgeRune = castI32(data, off, numEdges)
+	off += 4 * numEdges
+	ft.edgeTgt = castU32(data, off, numEdges)
+	return ft, nil
+}
+
+func u32(b []byte, off int) uint32 { return binary.LittleEndian.Uint32(b[off:]) }
+
+func castU32(b []byte, off, n int) []uint32 {
+	if n == 0 {
+		return nil
+	}
+	return unsafe.Slice((*uint32)(unsafe.Pointer(&b[off])), n)
+}
+
+func castI32(b []byte, off, n int) []int32 {
+	if n == 0 {
+		return nil
+	}
+	return unsafe.Slice((*int32)(unsafe.Pointer(&b[off])), n)
+}

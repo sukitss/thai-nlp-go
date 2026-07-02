@@ -1,0 +1,16 @@
+# build output
+/thainlp
+/bin/
+*.test
+*.out
+
+# coverage
+coverage.out
+coverage.html
+
+# go workspace / editor
+go.work
+go.work.sum
+.idea/
+.vscode/
+*.swp
