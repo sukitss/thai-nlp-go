@@ -243,6 +243,71 @@ func reorderVowels(text string) string {
 	return text
 }
 
+// thaiCCC returns the Unicode canonical combining class of a Thai (or the two
+// Patani-Malay generic) combining marks, or 0 for base characters and class-0
+// marks. Class 0 marks form an opaque boundary and are never reordered.
+// Values per UTC L2/18-216 / UCD: phinthu=9, sara u/uu=103, tone marks=107,
+// macron-below=220, tilde=230.
+func thaiCCC(r rune) int {
+	switch r {
+	case 0x0E3A: // phinthu (nukta)
+		return 9
+	case 0x0E38, 0x0E39: // sara u, sara uu (below vowels)
+		return 103
+	case 0x0E48, 0x0E49, 0x0E4A, 0x0E4B: // mai ek/tho/tri/chattawa (tone marks)
+		return 107
+	case 0x0331: // combining macron below (generic, Patani Malay)
+		return 220
+	case 0x0303: // combining tilde (generic, Patani Malay)
+		return 230
+	}
+	return 0
+}
+
+// Reorder puts combining marks into Unicode canonical order: within each run of
+// consecutive non-zero-class marks it stable-sorts by combining class. This is
+// exactly what Unicode NFC does for Thai (which has no canonical composition),
+// so two sequences that render identically but were typed in different mark
+// order (e.g. tone-before-vowel vs vowel-before-tone) become identical bytes —
+// something PyThaiNLP's normalize() does not do. Class-0 marks are opaque
+// boundaries and are never moved (matching Unicode). Verified against
+// golang.org/x/text/unicode/norm.NFC in the test suite.
+func Reorder(text string) string {
+	rs := []rune(text)
+	changed := false
+	for i := 0; i < len(rs); {
+		if thaiCCC(rs[i]) == 0 {
+			i++
+			continue
+		}
+		j := i
+		for j < len(rs) && thaiCCC(rs[j]) > 0 {
+			j++
+		}
+		// stable insertion sort rs[i:j] ascending by combining class
+		for a := i + 1; a < j; a++ {
+			for b := a; b > i && thaiCCC(rs[b-1]) > thaiCCC(rs[b]); b-- {
+				rs[b-1], rs[b] = rs[b], rs[b-1]
+				changed = true
+			}
+		}
+		i = j
+	}
+	if !changed {
+		return text
+	}
+	return string(rs)
+}
+
+// Canonical is the strongest canonicalization: PyThaiNLP-style Normalize plus
+// Unicode canonical mark reordering (Reorder). Use it for exact-match / dedup /
+// hashing where two visually-identical strings must have identical bytes. Not
+// byte-identical to PyThaiNLP (which omits Unicode normalization) — that is the
+// point.
+func Canonical(text string) string {
+	return Reorder(Normalize(text))
+}
+
 // RemoveDangling removes combining marks that have no base character: at the
 // start of the text, or immediately after a space.
 func RemoveDangling(text string) string {

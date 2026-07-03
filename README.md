@@ -112,7 +112,21 @@ normalize.Normalize("นานาาา")  // "นานา"  (drop repeated vow
 normalize.Normalize("ก    ข")  // "ก ข"   (collapse spaces)
 ```
 
-Note: it does **not** apply Unicode NFC — compose that separately if needed.
+For the strongest canonicalization (exact-match / dedup / hashing) use
+`Canonical`, which adds Unicode canonical mark reordering on top — something
+PyThaiNLP's `normalize()` does not do:
+
+```go
+normalize.Canonical(s)  // Normalize + canonical combining-mark order
+normalize.Reorder(s)    // just the reordering step
+```
+
+`Reorder` puts Thai combining marks into Unicode canonical order (stable-sort by
+combining class within a cluster), so two strings that render identically but
+were typed in different mark order become identical bytes. It is verified to
+match `golang.org/x/text/unicode/norm.NFC` over 200k random Thai sequences and
+the cases in Unicode UTC L2/18-216 — with **no runtime dependency** (hand-coded
+for the Thai block; x/text is used only as a test oracle).
 
 ## Stopwords
 

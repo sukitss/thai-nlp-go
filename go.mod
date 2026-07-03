@@ -7,4 +7,6 @@ require (
 	github.com/dlclark/regexp2 v1.12.0 // test-only (tokenize oracle)
 )
 
+require golang.org/x/text v0.21.0
+
 require golang.org/x/sys v0.40.0 // indirect
