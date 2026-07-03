@@ -30,26 +30,40 @@ type scratch struct {
 	pathBuf []int
 	lenBuf  []int
 	psbuf   []int
-	graph   map[int][]int
-	gen     int
+	// candidate graph as a generation-marked linked list (preserves edge
+	// insertion order, which BFS relies on): adjHead/adjTail index into
+	// edgeTo/edgeNext; a node has edges iff adjGen[node] == the current gen.
+	adjHead  []int
+	adjTail  []int
+	adjGen   []int
+	edgeTo   []int
+	edgeNext []int
+	gen      int
+	adjG     int
 }
 
-var scratchPool = sync.Pool{New: func() any {
-	return &scratch{graph: make(map[int][]int)}
-}}
+var scratchPool = sync.Pool{New: func() any { return &scratch{} }}
 
 func (sc *scratch) prepare(n int) {
 	if cap(sc.parent) < n+1 {
 		sc.parent = make([]int, n+1)
 		sc.visited = make([]int, n+1) // zeroed; gen (>0, persisted) marks visits
+		sc.adjHead = make([]int, n+1)
+		sc.adjTail = make([]int, n+1)
+		sc.adjGen = make([]int, n+1) // zeroed; adjG (>0, persisted) marks edges
 	} else {
 		sc.parent = sc.parent[:n+1]
 		sc.visited = sc.visited[:n+1]
+		sc.adjHead = sc.adjHead[:n+1]
+		sc.adjTail = sc.adjTail[:n+1]
+		sc.adjGen = sc.adjGen[:n+1]
 	}
 	sc.queue = sc.queue[:0]
 	sc.pathBuf = sc.pathBuf[:0]
 	sc.lenBuf = sc.lenBuf[:0]
-	clear(sc.graph)
+	sc.edgeTo = sc.edgeTo[:0]
+	sc.edgeNext = sc.edgeNext[:0]
+	sc.adjG++ // fresh generation so no stale node appears to have edges
 }
 
 // TCCEngine reports Thai Character Cluster boundaries. TCC satisfies it.
@@ -205,12 +219,17 @@ func (s *Segmenter) onecut(text []rune) []span {
 	// are onecut-local, so a plain Segmenter stays safe for concurrent use.
 	sc := scratchPool.Get().(*scratch)
 	sc.prepare(n)
-	graph := sc.graph
 	parent := sc.parent
 	visited := sc.visited
 	queue := sc.queue
 	pathBuf := sc.pathBuf
 	lenBuf := sc.lenBuf
+	adjHead := sc.adjHead
+	adjTail := sc.adjTail
+	adjGen := sc.adjGen
+	edgeTo := sc.edgeTo
+	edgeNext := sc.edgeNext
+	adjG := sc.adjG
 
 	graphSize := 0
 	endPos := 0
@@ -222,7 +241,17 @@ func (s *Segmenter) onecut(text []rune) []span {
 		for _, L := range lenBuf {
 			cand := beginPos + L
 			if validPoss[cand] {
-				graph[beginPos] = append(graph[beginPos], cand)
+				// append edge beginPos -> cand (keep insertion order)
+				idx := len(edgeTo)
+				edgeTo = append(edgeTo, cand)
+				edgeNext = append(edgeNext, -1)
+				if adjGen[beginPos] != adjG {
+					adjGen[beginPos] = adjG
+					adjHead[beginPos] = idx
+				} else {
+					edgeNext[adjTail[beginPos]] = idx
+				}
+				adjTail[beginPos] = idx
 				graphSize++
 				if !ps.contains(cand) {
 					ps.push(cand)
@@ -246,24 +275,30 @@ func (s *Segmenter) onecut(text []rune) []span {
 			for qi := 0; qi < len(queue); qi++ {
 				v := queue[qi]
 				stop := false
-				for _, pos := range graph[v] {
-					if visited[pos] == g {
-						continue
+				if adjGen[v] == adjG {
+					for e := adjHead[v]; e != -1; e = edgeNext[e] {
+						pos := edgeTo[e]
+						if visited[pos] == g {
+							continue
+						}
+						visited[pos] = g
+						parent[pos] = v
+						if pos == goal {
+							stop = true
+							break
+						}
+						queue = append(queue, pos)
 					}
-					visited[pos] = g
-					parent[pos] = v
-					if pos == goal {
-						stop = true
-						break
-					}
-					queue = append(queue, pos)
 				}
 				if stop {
 					break
 				}
 			}
+			// reset the candidate graph for the next window
 			graphSize = 0
-			clear(graph)
+			adjG++
+			edgeTo = edgeTo[:0]
+			edgeNext = edgeNext[:0]
 			// reconstruct goal..endPos backward, then emit spans forward
 			pathBuf = pathBuf[:0]
 			for cur := goal; cur != endPos; cur = parent[cur] {
@@ -306,7 +341,9 @@ func (s *Segmenter) onecut(text []rune) []span {
 				}
 			}
 			graphSize = 0
-			clear(graph)
+			adjG++
+			edgeTo = edgeTo[:0]
+			edgeNext = edgeNext[:0]
 			spans = append(spans, span{beginPos, endPos})
 			ps.push(endPos)
 		}
@@ -316,6 +353,9 @@ func (s *Segmenter) onecut(text []rune) []span {
 	sc.pathBuf = pathBuf
 	sc.lenBuf = lenBuf
 	sc.psbuf = ps.s
+	sc.edgeTo = edgeTo
+	sc.edgeNext = edgeNext
+	sc.adjG = adjG
 	scratchPool.Put(sc)
 	return spans
 }
