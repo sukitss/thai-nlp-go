@@ -7,8 +7,8 @@
 //	tokenize  word segmentation (newmm port) + char n-gram
 //	normalize Unicode/Thai text normalization (PyThaiNLP-faithful)
 //	stopwords Thai/English stop-word filtering (PyThaiNLP-faithful)
-//	sentence  Thai sentence boundary detection        (planned)
-//	translit  transliteration / name-variant matching (planned)
+//	sentence  whitespace sentence splitting (rule-based)
+//	translit  name-variant matching (MetaSound phonetic key)
 //
 // Design rule #1: performance and memory. Components share a single
 // memory-mapped dictionary via dict.Default rather than each loading its own —

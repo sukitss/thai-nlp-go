@@ -20,10 +20,9 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`tokenize`](tokenize) | Word segmentation (PyThaiNLP **newmm** port) + char **n-gram** | ✅ |
 | [`normalize`](normalize) | Text normalization (PyThaiNLP-faithful) | ✅ |
 | [`stopwords`](stopwords) | Thai/English stop-word filtering | ✅ |
-| [`sentence`](sentence) | Sentence boundary detection | 🔲 stub |
-| [`translit`](translit) | Name-variant / transliteration matching | 🔲 stub |
+| [`sentence`](sentence) | Whitespace sentence splitting (rule-based) | ✅ |
+| [`translit`](translit) | Name-variant matching (MetaSound phonetic key) | ✅ |
 
-Remaining stubs define their intended API and are hardened one package at a time.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, and
 [docs/TEST-REPORT.md](docs/TEST-REPORT.md) for a test/benchmark snapshot
 (regenerate with `make report`).
@@ -130,6 +129,24 @@ sw.Filter([]string{"ผม","และ","รัก","the"}) // ["ผม" "รั
 
 custom := stopwords.Union(stopwords.Default(), stopwords.New("อาริน", "เวธกา"))
 ```
+
+## Sentence & transliteration
+
+```go
+import (
+    "github.com/sukitss/thai-nlp-go/sentence"
+    "github.com/sukitss/thai-nlp-go/translit"
+)
+
+sentence.Split("ผมชอบกินข้าว วันนี้อากาศดี") // ["ผมชอบกินข้าว" "วันนี้อากาศดี"]
+
+translit.Key("ทองดี") == translit.Key("ทองดา") // true — spelling variants collide
+```
+
+`sentence` splits on whitespace (rule-based, matches PyThaiNLP non-ML engines).
+`translit.Key` is a MetaSound phonetic key (faithful port) for name-variant
+matching. Both are baselines — ML sentence segmentation and fuzzy/alias name
+matching are future improvements.
 
 ### CLI
 
