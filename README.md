@@ -175,6 +175,18 @@ crf.Split("ผมชอบกินข้าว วันนี้อากา�
 It's a separate package (pulls in the tokenizer + embeds the ~2 MB CC-BY-4.0
 model), so the base `sentence` package stays dependency-light.
 
+**Retrainable (in-domain).** crfcut is highly domain-dependent, so the CRF is
+retrainable on your own labelled data (`crf.Train` / `crf.Eval` / `Model.Save`,
+plus the `cmd/crftrain` tool that reads CoNLL-U). Validated on Universal
+Dependencies Thai (CC BY-SA): training in-domain on UD_Thai-TUD lifts held-out
+sentence-boundary **E-F1 to 0.99, vs 0.78 for the embedded TED model and 0.47
+for whitespace splitting** — in-domain training is the biggest quality lever.
+
+```go
+model := crf.Train(examples, 10)          // examples: tokens + I/E labels
+m := crf.Eval(model.Labels, goldExamples) // E-precision/recall/F1
+```
+
 ### CLI
 
 ```sh

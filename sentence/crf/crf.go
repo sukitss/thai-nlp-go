@@ -4,6 +4,11 @@
 // and CPU-only (Viterbi over two labels): suitable for large batch workloads,
 // unlike LLM/neural segmenters.
 //
+// The default model (Default) is the embedded crfcut model. The CRF is also
+// retrainable: use Train to fit a Model on your own in-domain labelled data
+// (crfcut is highly domain-dependent), Eval to measure it, and Model.Save /
+// LoadModel to persist it. See cmd/crftrain.
+//
 // This is a separate, opt-in package: it pulls in the tokenizer and embeds the
 // ~2 MB model, so the parent `sentence` package stays dependency-light. The
 // model is CC-BY-4.0 (PyThaiNLP); see NOTICE.
@@ -20,8 +25,8 @@ import (
 	"github.com/sukitss/thai-nlp-go/tokenize"
 )
 
-// Linear-chain CRF transition weights (labels: 0=I "inside", 1=E "end").
-// From the crfcut model dump.
+// Baseline linear-chain CRF transition weights (labels: 0=I "inside", 1=E
+// "end"), from the crfcut model dump.
 const (
 	tII = 1.071558
 	tIE = -0.604471
@@ -40,22 +45,28 @@ var startersData string
 
 type weights struct{ i, e float64 }
 
+// Model is a CRF sentence segmenter: state-feature weights plus the 2x2
+// transition weights. Safe for concurrent reads.
+type Model struct {
+	feats              map[string]weights
+	tII, tIE, tEI, tEE float64
+}
+
 var (
-	once     sync.Once
-	features map[string]weights
-	enders   map[string]bool
-	starters map[string]bool
-	seg      *tokenize.Segmenter
+	once         sync.Once
+	defaultModel *Model
+	enders       map[string]bool // feature inputs (shared across models)
+	starters     map[string]bool
+	seg          *tokenize.Segmenter
 )
 
 func load() {
 	once.Do(func() {
-		features = make(map[string]weights, 40000)
+		feats := make(map[string]weights, 40000)
 		sc := bufio.NewScanner(strings.NewReader(modelData))
 		sc.Buffer(make([]byte, 0, 1<<16), 1<<20)
 		for sc.Scan() {
 			line := sc.Text()
-			// attr \t wI \t wE  (attr may contain spaces but not tabs)
 			a := strings.IndexByte(line, '\t')
 			if a < 0 {
 				continue
@@ -67,12 +78,19 @@ func load() {
 			b += a + 1
 			wi, _ := strconv.ParseFloat(line[a+1:b], 64)
 			we, _ := strconv.ParseFloat(line[b+1:], 64)
-			features[line[:a]] = weights{wi, we}
+			feats[line[:a]] = weights{wi, we}
 		}
+		defaultModel = &Model{feats: feats, tII: tII, tIE: tIE, tEI: tEI, tEE: tEE}
 		enders = parseSet(endersData)
 		starters = parseSet(startersData)
 		seg, _ = tokenize.NewDefault()
 	})
+}
+
+// Default returns the embedded crfcut model (the baseline).
+func Default() *Model {
+	load()
+	return defaultModel
 }
 
 func parseSet(data string) map[string]bool {
@@ -86,15 +104,18 @@ func parseSet(data string) map[string]bool {
 	return m
 }
 
-// Split segments text into sentences using the CRF model. It returns nil for
+// Split segments text into sentences with the default model. Returns nil for
 // empty input.
-func Split(text string) []string {
+func Split(text string) []string { return Default().Split(text) }
+
+// Split segments text into sentences using this model.
+func (m *Model) Split(text string) []string {
 	load()
 	toks := seg.Segment(text) // keep whitespace (word_tokenize default)
 	if len(toks) == 0 {
 		return nil
 	}
-	labs := tag(stateScores(toks))
+	labs := m.tag(m.stateScores(toks))
 	labs[len(labs)-1] = 'E' // always cut the last sentence
 
 	// Terminal-punctuation and whitespace overrides (mirror crfcut).
@@ -121,13 +142,20 @@ func Split(text string) []string {
 
 const window = 2
 
-// stateScores computes, per token, the summed CRF state weights {I, E}. It ports
-// crfcut._extract_features (window 2, n-grams 1..3) but scores on the fly: each
-// feature key is built into a reused byte buffer and looked up via
-// features[string(buf)], which the Go compiler special-cases to avoid allocating
-// the key string. This keeps the exact same keys (so output is unchanged) while
-// eliminating the per-feature string and [][]string allocations.
-func stateScores(toks []string) [][2]float64 {
+// tags returns raw I/E labels for the tokens (no punctuation/space overrides);
+// used by training and evaluation.
+func (m *Model) tags(toks []string) []byte {
+	if len(toks) == 0 {
+		return nil
+	}
+	return m.tag(m.stateScores(toks))
+}
+
+// stateScores computes, per token, the summed CRF state weights {I, E}, building
+// each feature key into a reused byte buffer and looking it up via
+// m.feats[string(buf)] (the compiler special-cases map[string(bytes)] to avoid
+// allocating the key). Ports crfcut._extract_features (window 2, n-grams 1..3).
+func (m *Model) stateScores(toks []string) [][2]float64 {
 	pad := make([]string, 0, len(toks)+2*window)
 	for k := 0; k < window; k++ {
 		pad = append(pad, "xxpad")
@@ -168,13 +196,13 @@ func stateScores(toks []string) [][2]float64 {
 			}
 			buf = append(buf, p...)
 		}
-		w := features[string(buf)] // no alloc: compiler special-cases map[string(bytes)]
+		w := m.feats[string(buf)]
 		*si += w.i
 		*se += w.e
 	}
 
 	for i := window; i < len(pad)-window; i++ {
-		si, se := features["bias"].i, features["bias"].e
+		si, se := m.feats["bias"].i, m.feats["bias"].e
 		for ng := 1; ng <= 3; ng++ {
 			for j := i - window; j < i+window+2-ng; j++ {
 				add(&si, &se, "word_", ng, j-i, pad[j:j+ng])
@@ -188,9 +216,9 @@ func stateScores(toks []string) [][2]float64 {
 }
 
 // tag runs Viterbi over the two labels and returns 'I'/'E' per token.
-func tag(scores [][2]float64) []byte {
+func (m *Model) tag(scores [][2]float64) []byte {
 	n := len(scores)
-	trans := [2][2]float64{{tII, tIE}, {tEI, tEE}}
+	trans := [2][2]float64{{m.tII, m.tIE}, {m.tEI, m.tEE}}
 	prev := scores[0]
 	bp := make([][2]int, n)
 	for i := 1; i < n; i++ {
