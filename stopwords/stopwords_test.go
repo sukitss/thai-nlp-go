@@ -108,3 +108,38 @@ func TestUnionAndNew(t *testing.T) {
 		t.Error("Union should contain words from both sets")
 	}
 }
+
+func TestBuilderDocFreq(t *testing.T) {
+	b := NewBuilder()
+	// "และ"/"ที่" appear in every doc → stopwords; content words rare
+	b.AddDoc([]string{"และ", "ที่", "แมว", "วิ่ง"})
+	b.AddDoc([]string{"และ", "ที่", "หมา", "เห่า"})
+	b.AddDoc([]string{"และ", "ที่", "นก", "บิน"})
+	b.AddDoc([]string{"และ", "ปลา", "ว่าย"}) // "ที่" absent here → 3/4
+	if b.Docs() != 4 {
+		t.Fatalf("Docs=%d want 4", b.Docs())
+	}
+	// threshold 1.0 → only words in ALL docs (และ)
+	all := b.Build(1.0)
+	if !all.IsStopword("และ") || all.IsStopword("ที่") || all.IsStopword("แมว") {
+		t.Errorf("Build(1.0) = %v, want only และ", all.Words())
+	}
+	// threshold 0.7 → และ(4/4) + ที่(3/4)
+	most := b.Build(0.7)
+	if !most.IsStopword("และ") || !most.IsStopword("ที่") || most.IsStopword("แมว") {
+		t.Errorf("Build(0.7) = %v, want และ+ที่", most.Words())
+	}
+	// dedup within a doc: repeated token counts once
+	b2 := NewBuilder()
+	b2.AddDoc([]string{"x", "x", "x"})
+	b2.AddDoc([]string{"y"})
+	if got := b2.Build(1.0); got.IsStopword("x") { // x in 1/2 docs, not all
+		t.Errorf("x should not be stopword at 1.0: %v", got.Words())
+	}
+}
+
+func TestBuilderEmpty(t *testing.T) {
+	if NewBuilder().Build(0.5).Len() != 0 {
+		t.Error("empty builder should give empty set")
+	}
+}

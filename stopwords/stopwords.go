@@ -123,6 +123,60 @@ func (s *Set) Filter(tokens []string) []string {
 // Len reports the number of words in the set.
 func (s *Set) Len() int { return len(s.m) }
 
+// Builder derives a corpus-specific stop-word set by document frequency: words
+// that appear in a large fraction of documents carry little signal (the classic
+// Luhn/IR criterion) and make good domain stop words. This is the principled
+// "frequency-based" stop-word method — more robust than ranking by raw term
+// frequency, which pulls in high-frequency content words. Use it to augment (via
+// Union) the general-purpose Default set with terms specific to your corpus.
+//
+// Not safe for concurrent Add; build fully, then the resulting Set is read-only.
+type Builder struct {
+	df   map[string]int // document frequency per token
+	docs int
+	seen map[string]struct{} // tokens seen in the current document
+}
+
+// NewBuilder returns an empty document-frequency Builder.
+func NewBuilder() *Builder {
+	return &Builder{df: map[string]int{}, seen: map[string]struct{}{}}
+}
+
+// AddDoc records one document's tokens (duplicates within the doc count once).
+func (b *Builder) AddDoc(tokens []string) {
+	for k := range b.seen {
+		delete(b.seen, k)
+	}
+	for _, t := range tokens {
+		if _, ok := b.seen[t]; ok {
+			continue
+		}
+		b.seen[t] = struct{}{}
+		b.df[t]++
+	}
+	b.docs++
+}
+
+// Build returns the Set of tokens whose document frequency is at least
+// minDocFraction of all documents (0..1). A typical value is 0.4–0.6. Returns an
+// empty set if no documents were added.
+func (b *Builder) Build(minDocFraction float64) *Set {
+	s := &Set{m: map[string]struct{}{}}
+	if b.docs == 0 {
+		return s
+	}
+	threshold := minDocFraction * float64(b.docs)
+	for w, c := range b.df {
+		if float64(c) >= threshold {
+			s.m[w] = struct{}{}
+		}
+	}
+	return s
+}
+
+// Docs reports how many documents were added.
+func (b *Builder) Docs() int { return b.docs }
+
 // Words returns the set's words, sorted (for inspection/testing).
 func (s *Set) Words() []string {
 	out := make([]string, 0, len(s.m))

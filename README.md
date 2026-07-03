@@ -150,6 +150,19 @@ sw.Filter([]string{"ผม","และ","รัก","the"}) // ["ผม" "รั
 custom := stopwords.Union(stopwords.Default(), stopwords.New("อาริน", "เวธกา"))
 ```
 
+For **corpus-specific** stop words, derive them by document frequency (the
+classic IR criterion — words in most documents carry little signal; more robust
+than ranking by raw term frequency, which pulls in common content words):
+
+```go
+b := stopwords.NewBuilder()
+for _, doc := range corpus {
+    b.AddDoc(seg.SegmentNoWS(doc)) // tokens of each document
+}
+domain := b.Build(0.5) // words appearing in ≥50% of documents
+sw := stopwords.Union(stopwords.Default(), domain)
+```
+
 ## Sentence & transliteration
 
 ```go
