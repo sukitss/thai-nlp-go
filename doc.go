@@ -4,6 +4,7 @@
 // The real functionality lives in sub-packages; import only what you need:
 //
 //	dict      shared dictionary layer (mmap flat trie, one shared instance)
+//	script    split mixed-language text into runs by writing system (routing)
 //	tokenize  word segmentation (newmm port) + char n-gram
 //	normalize Unicode/Thai text normalization (PyThaiNLP-faithful)
 //	stopwords Thai/English stop-word filtering (PyThaiNLP-faithful)

@@ -17,6 +17,7 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | Package | What | Status |
 | --- | --- | --- |
 | [`dict`](dict) | Shared dictionary (mmap flat trie, one shared instance) | ✅ |
+| [`script`](script) | Split mixed-language text into runs by writing system | ✅ |
 | [`tokenize`](tokenize) | Word segmentation (PyThaiNLP **newmm** port) + char **n-gram** | ✅ |
 | [`normalize`](normalize) | Text normalization (PyThaiNLP-faithful) | ✅ |
 | [`stopwords`](stopwords) | Thai/English stop-word filtering | ✅ |
@@ -235,6 +236,30 @@ for whitespace splitting** — in-domain training is the biggest quality lever.
 model := crf.Train(examples, 10)          // examples: tokens + I/E labels
 m := crf.Eval(model.Labels, goldExamples) // E-precision/recall/F1
 ```
+
+## Multilingual routing
+
+Real corpora mix scripts (Thai + English + Chinese + Korean …). `script.SplitByScript`
+segments text into runs by writing system in one cheap pass, so you route each run
+to the right tokenizer (Thai → this library, CJK → a CJK tokenizer, Latin →
+whitespace) instead of forcing one tokenizer over everything:
+
+```go
+import "github.com/sukitss/thai-nlp-go/script"
+
+for _, r := range script.SplitByScript("ตัวอย่างenglishwording你好") {
+    switch r.Script {
+    case script.Thai:  // r.Text -> tokenize.SegmentNoWS
+    case script.Latin: // r.Text -> whitespace
+    case script.Han:   // r.Text -> a CJK tokenizer
+    }
+}
+```
+
+It is script itemization (Unicode UAX #24), not language detection. Decided by
+direct Unicode range checks — **no tables to load, no init cost** (~µs, stateless,
+concurrency-safe). Common characters (spaces/punctuation/digits) attach to their
+neighbor so runs don't fragment.
 
 ### CLI
 
