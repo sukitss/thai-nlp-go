@@ -55,12 +55,45 @@ func load() (*Segmenter, error) {
 // prebuilt dict.FlatTrie).
 func New(d dict.Prefixer) *Segmenter { return &Segmenter{d: d} }
 
-// Default returns a Segmenter backed by the shared embedded Chinese dictionary.
+// EmbeddedSize reports the byte size of the embedded Chinese dictionary — the
+// approximate resident memory that Default (or the first Cut) will allocate.
+// Call it to decide, before loading, whether to pay that cost.
+func EmbeddedSize() int { return len(zhFDT) }
+
+// Load parses the embedded dictionary into a NEW Segmenter you own — an explicit
+// alternative to Default/Cut for when you want to control exactly WHEN the ~
+// EmbeddedSize() bytes are allocated (and to release them by dropping the
+// reference). Unlike Default it does not populate the process-wide shared
+// instance, so each call allocates its own copy.
+func Load() (*Segmenter, error) {
+	ft, err := dict.FromBytes(zhFDT)
+	if err != nil {
+		return nil, err
+	}
+	return &Segmenter{d: ft}, nil
+}
+
+// Open memory-maps a prebuilt flat-trie dictionary file (dict.OpenFlat) into a
+// Segmenter — near-zero resident memory (shared via the OS page cache), for when
+// you ship the dictionary as a file rather than paying for the embedded copy.
+func Open(path string) (*Segmenter, error) {
+	ft, err := dict.OpenFlat(path)
+	if err != nil {
+		return nil, err
+	}
+	return &Segmenter{d: ft}, nil
+}
+
+// Default returns a process-wide shared Segmenter backed by the embedded
+// dictionary, loading it at most once (lazy). Convenient, but the ~
+// EmbeddedSize() bytes it allocates stay resident for the process lifetime; use
+// Load or Open if you want to control or release that memory.
 func Default() (*Segmenter, error) { return load() }
 
-// Cut segments Chinese text with the shared dictionary. It panics only if the
-// embedded dictionary fails to load (a build/data error, not a runtime input
-// error); use Default if you want to handle that error.
+// Cut segments Chinese text with the shared Default dictionary (loading it on
+// first use). Convenience wrapper; it panics only if the embedded dictionary
+// fails to load (a build/data error). Use Default/Load/Open to handle the error
+// or control memory.
 func Cut(text string) []string {
 	s, err := load()
 	if err != nil {

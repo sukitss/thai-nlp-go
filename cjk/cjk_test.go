@@ -94,3 +94,17 @@ func TestCutConcurrent(t *testing.T) {
 		<-done
 	}
 }
+
+func TestLoadOwnInstance(t *testing.T) {
+	if EmbeddedSize() <= 0 {
+		t.Fatal("EmbeddedSize should be > 0")
+	}
+	s, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// an explicitly loaded instance segments the same as the shared one
+	if strings.Join(s.Cut("自然语言处理"), "|") != strings.Join(Cut("自然语言处理"), "|") {
+		t.Error("Load() instance differs from shared Cut")
+	}
+}
