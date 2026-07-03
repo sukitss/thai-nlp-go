@@ -164,9 +164,15 @@ for fuzzy matching. Bucket candidates by a phonetic key, then rank with edit
 distance to recover variants the keys miss:
 
 ```go
-translit.Key("ทองดี") == translit.Key("ทองดา")  // phonetic key collides
-translit.Similarity("อุจิวะ", "อุจิฮะ")            // ~0.83 (1 edit) for the rest
+translit.SoundsLike("ทองดี", "ทองดา", 0.8) // true — same-sounding name variants
+translit.SoundsLike("อุจิวะ", "อุจิฮะ", 0.8) // true — keys differ but 1 edit (~0.83)
+translit.Key("ทองดี") == translit.Key("ทองดา")  // a single phonetic key
+translit.Similarity("อุจิวะ", "อุจิฮะ")            // 0.83 edit-distance ratio
 ```
+
+`SoundsLike` combines the phonetic keys (bucketing) with edit distance (catching
+near-misses the keys drop) — the practical sound-alike test for de-duplicating
+name spellings.
 
 For higher-accuracy sentence segmentation there is an opt-in CRF sub-package —
 a faithful port of PyThaiNLP's `crfcut`, still CPU-only and batch-friendly (no
