@@ -94,7 +94,7 @@ func Split(text string) []string {
 	if len(toks) == 0 {
 		return nil
 	}
-	labs := tag(extractFeatures(toks))
+	labs := tag(stateScores(toks))
 	labs[len(labs)-1] = 'E' // always cut the last sentence
 
 	// Terminal-punctuation and whitespace overrides (mirror crfcut).
@@ -121,8 +121,13 @@ func Split(text string) []string {
 
 const window = 2
 
-// extractFeatures ports crfcut._extract_features (window 2, n-grams 1..3).
-func extractFeatures(toks []string) [][]string {
+// stateScores computes, per token, the summed CRF state weights {I, E}. It ports
+// crfcut._extract_features (window 2, n-grams 1..3) but scores on the fly: each
+// feature key is built into a reused byte buffer and looked up via
+// features[string(buf)], which the Go compiler special-cases to avoid allocating
+// the key string. This keeps the exact same keys (so output is unchanged) while
+// eliminating the per-feature string and [][]string allocations.
+func stateScores(toks []string) [][2]float64 {
 	pad := make([]string, 0, len(toks)+2*window)
 	for k := 0; k < window; k++ {
 		pad = append(pad, "xxpad")
@@ -146,42 +151,47 @@ func extractFeatures(toks []string) [][]string {
 		}
 	}
 
-	out := make([][]string, 0, len(toks))
+	out := make([][2]float64, len(toks))
+	buf := make([]byte, 0, 64)
+	add := func(si, se *float64, prefix string, ng, d0 int, parts []string) {
+		buf = buf[:0]
+		buf = append(buf, prefix...)
+		buf = strconv.AppendInt(buf, int64(ng), 10)
+		buf = append(buf, '_')
+		buf = strconv.AppendInt(buf, int64(d0), 10)
+		buf = append(buf, '_')
+		buf = strconv.AppendInt(buf, int64(d0+ng), 10)
+		buf = append(buf, '=')
+		for k, p := range parts {
+			if k > 0 {
+				buf = append(buf, '|')
+			}
+			buf = append(buf, p...)
+		}
+		w := features[string(buf)] // no alloc: compiler special-cases map[string(bytes)]
+		*si += w.i
+		*se += w.e
+	}
+
 	for i := window; i < len(pad)-window; i++ {
-		feats := make([]string, 0, 40)
-		feats = append(feats, "bias")
+		si, se := features["bias"].i, features["bias"].e
 		for ng := 1; ng <= 3; ng++ {
 			for j := i - window; j < i+window+2-ng; j++ {
-				fp := strconv.Itoa(ng) + "_" + strconv.Itoa(j-i) + "_" + strconv.Itoa(j-i+ng)
-				feats = append(feats, "word_"+fp+"="+strings.Join(pad[j:j+ng], "|"))
-				feats = append(feats, "ender_"+fp+"="+strings.Join(ender[j:j+ng], "|"))
-				feats = append(feats, "starter_"+fp+"="+strings.Join(starter[j:j+ng], "|"))
+				add(&si, &se, "word_", ng, j-i, pad[j:j+ng])
+				add(&si, &se, "ender_", ng, j-i, ender[j:j+ng])
+				add(&si, &se, "starter_", ng, j-i, starter[j:j+ng])
 			}
 		}
-		out = append(out, feats)
+		out[i-window] = [2]float64{si, se}
 	}
 	return out
 }
 
-func stateScore(attrs []string, label int) float64 {
-	var s float64
-	if label == 0 {
-		for _, a := range attrs {
-			s += features[a].i
-		}
-	} else {
-		for _, a := range attrs {
-			s += features[a].e
-		}
-	}
-	return s
-}
-
 // tag runs Viterbi over the two labels and returns 'I'/'E' per token.
-func tag(feats [][]string) []byte {
-	n := len(feats)
+func tag(scores [][2]float64) []byte {
+	n := len(scores)
 	trans := [2][2]float64{{tII, tIE}, {tEI, tEE}}
-	prev := [2]float64{stateScore(feats[0], 0), stateScore(feats[0], 1)}
+	prev := scores[0]
 	bp := make([][2]int, n)
 	for i := 1; i < n; i++ {
 		var cur [2]float64
@@ -193,7 +203,7 @@ func tag(feats [][]string) []byte {
 					best, bestp = v, p
 				}
 			}
-			cur[l] = best + stateScore(feats[i], l)
+			cur[l] = best + scores[i][l]
 			bp[i][l] = bestp
 		}
 		prev = cur
