@@ -47,6 +47,48 @@ func (f *FlatTrie) isEnd(node uint32) bool {
 // maximum-probability segmentation).
 func (f *FlatTrie) Weighted() bool { return f.weights != nil }
 
+// Weight returns the stored weight of an exact word (e.g. a scaled log-frequency
+// for Chinese/Thai, or -cost for Japanese) and whether the word is in the
+// dictionary. On an unweighted dictionary the weight is 0. Useful for IDF-style
+// term weighting in a retriever.
+func (f *FlatTrie) Weight(word string) (int32, bool) {
+	var cur uint32
+	for _, r := range word {
+		lo, hi := f.edgeStart[cur], f.edgeStart[cur+1]
+		rr := int32(r)
+		found := false
+		for lo < hi {
+			mid := (lo + hi) >> 1
+			v := f.edgeRune[mid]
+			if v == rr {
+				cur = f.edgeTgt[mid]
+				found = true
+				break
+			} else if v < rr {
+				lo = mid + 1
+			} else {
+				hi = mid
+			}
+		}
+		if !found {
+			return 0, false
+		}
+	}
+	if !f.isEnd(cur) {
+		return 0, false
+	}
+	if f.weights != nil {
+		return f.weights[cur], true
+	}
+	return 0, true
+}
+
+// Contains reports whether word is in the dictionary.
+func (f *FlatTrie) Contains(word string) bool {
+	_, ok := f.Weight(word)
+	return ok
+}
+
 // PrefixWeights appends, for each dictionary word that is a prefix of
 // text[start:], a (rune-length, weight) pair — the weighted form of PrefixLens,
 // for DAG/DP segmentation. outLen and outW are reset and kept in sync. If the

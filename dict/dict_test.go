@@ -51,3 +51,27 @@ func TestFlatMatchesPointer(t *testing.T) {
 		t.Fatalf("pointer PrefixLens = %v, want [1 2 4]", got)
 	}
 }
+
+func TestWeightAndContains(t *testing.T) {
+	d, err := Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Contains("ภาษาไทย") {
+		t.Error("ภาษาไทย should be in the dict")
+	}
+	if d.Contains("ไม่ใช่คำจริงๆเลย") {
+		t.Error("nonsense should not be in the dict")
+	}
+	// weighted dict: a common word should have a (nonzero) weight
+	if d.Weighted() {
+		w, ok := d.Weight("การ")
+		if !ok {
+			t.Error("การ should be present")
+		}
+		_ = w
+	}
+	if _, ok := d.Weight(""); ok {
+		t.Error("empty string should not be present")
+	}
+}
