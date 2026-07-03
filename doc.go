@@ -8,7 +8,7 @@
 //	normalize Unicode/Thai text normalization (PyThaiNLP-faithful)
 //	stopwords Thai/English stop-word filtering (PyThaiNLP-faithful)
 //	sentence  whitespace sentence splitting (rule-based)
-//	translit  name-variant matching (MetaSound phonetic key)
+//	translit  name-variant matching (MetaSound/Udom83/LK82 keys + edit distance)
 //
 // Design rule #1: performance and memory. Components share a single
 // memory-mapped dictionary via dict.Default rather than each loading its own —

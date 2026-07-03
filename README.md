@@ -158,8 +158,15 @@ translit.Key("ทองดี") == translit.Key("ทองดา") // true — s
 ```
 
 `sentence` splits on whitespace (rule-based, matches PyThaiNLP non-ML engines).
-`translit.Key` is a MetaSound phonetic key (faithful port) for name-variant
-matching.
+`translit` offers three Thai phonetic keys — `Key` (MetaSound), `Udom83`,
+`LK82` (all faithful ports, golden-verified) — plus `Levenshtein`/`Similarity`
+for fuzzy matching. Bucket candidates by a phonetic key, then rank with edit
+distance to recover variants the keys miss:
+
+```go
+translit.Key("ทองดี") == translit.Key("ทองดา")  // phonetic key collides
+translit.Similarity("อุจิวะ", "อุจิฮะ")            // ~0.83 (1 edit) for the rest
+```
 
 For higher-accuracy sentence segmentation there is an opt-in CRF sub-package —
 a faithful port of PyThaiNLP's `crfcut`, still CPU-only and batch-friendly (no
