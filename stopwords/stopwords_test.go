@@ -143,3 +143,63 @@ func TestBuilderEmpty(t *testing.T) {
 		t.Error("empty builder should give empty set")
 	}
 }
+
+// TestBuilderDF: DF exposes per-term document frequency (dups in one doc
+// count once), and DocCount matches Docs.
+func TestBuilderDF(t *testing.T) {
+	b := NewBuilder()
+	b.AddDoc([]string{"และ", "แมว", "แมว", "แมว"}) // แมว dup → counts once
+	b.AddDoc([]string{"และ", "หมา"})
+	b.AddDoc([]string{"และ"})
+	if got := b.DF("และ"); got != 3 {
+		t.Errorf("DF(และ) = %d, want 3", got)
+	}
+	if got := b.DF("แมว"); got != 1 {
+		t.Errorf("DF(แมว) = %d, want 1 (dups in one doc count once)", got)
+	}
+	if got := b.DF("ไม่มี"); got != 0 {
+		t.Errorf("DF(unseen) = %d, want 0", got)
+	}
+	if b.DocCount() != 3 || b.DocCount() != b.Docs() {
+		t.Errorf("DocCount = %d, Docs = %d, want both 3", b.DocCount(), b.Docs())
+	}
+	if NewBuilder().DocCount() != 0 {
+		t.Error("empty builder DocCount should be 0")
+	}
+}
+
+// TestBuilderTerms: Terms visits every counted term exactly once with its DF,
+// and stops early when fn returns false.
+func TestBuilderTerms(t *testing.T) {
+	b := NewBuilder()
+	b.AddDoc([]string{"และ", "แมว"})
+	b.AddDoc([]string{"และ", "หมา"})
+	got := map[string]int{}
+	b.Terms(func(term string, df int) bool {
+		if _, dup := got[term]; dup {
+			t.Errorf("Terms visited %q twice", term)
+		}
+		got[term] = df
+		return true
+	})
+	want := map[string]int{"และ": 2, "แมว": 1, "หมา": 1}
+	if len(got) != len(want) {
+		t.Fatalf("Terms visited %d terms, want %d: %v", len(got), len(want), got)
+	}
+	for term, df := range want {
+		if got[term] != df {
+			t.Errorf("Terms df(%q) = %d, want %d", term, got[term], df)
+		}
+	}
+	// early stop
+	n := 0
+	b.Terms(func(string, int) bool { n++; return false })
+	if n != 1 {
+		t.Errorf("early stop visited %d terms, want 1", n)
+	}
+	// empty builder: fn never called
+	NewBuilder().Terms(func(string, int) bool {
+		t.Error("Terms called fn on empty builder")
+		return true
+	})
+}

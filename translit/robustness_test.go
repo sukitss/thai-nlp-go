@@ -71,10 +71,10 @@ func TestArbitraryInputNoPanic(t *testing.T) {
 // to what Python slicing semantics (word[2:] on a short string) would give.
 func TestLK82NonConsonantStart(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"า", "90000"},  // lone vowel: t2['า']='9'
-		{"5", "50000"},  // digit passes through unmapped
-		{" ", " 0000"},  // space passes through unmapped
-		{"ๆ", ""},       // sign-only input cleans to empty
+		{"า", "90000"}, // lone vowel: t2['า']='9'
+		{"5", "50000"}, // digit passes through unmapped
+		{" ", " 0000"}, // space passes through unmapped
+		{"ๆ", ""},      // sign-only input cleans to empty
 		{"กา5", "ก9500"},
 		{"5า", "า5000"}, // else-branch consumes both runes
 		{" ๆ", " 0000"},

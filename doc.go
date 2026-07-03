@@ -5,15 +5,19 @@
 //
 //	dict      shared dictionary layer (mmap flat trie, one shared instance)
 //	script    split mixed-language text into runs by writing system (routing)
+//	token     shared token-with-byte-offsets value used by the tokenizers
 //	tokenize  word segmentation (newmm port) + char n-gram
 //	cjk       Chinese word segmentation (dictionary maximal-matching, mmap)
 //	jp        Japanese word segmentation (dictionary maximal-matching, mmap)
 //	en        light English/Latin word tokenization (no dictionary)
 //	kr        light Korean tokenization (eojeol + particle stem, no dictionary)
 //	multi     one-call multilingual tokenization (detect + route th/cn/jp/kr/en)
+//	          + Analyzer, one configurable pipeline for documents and queries
 //	normalize Unicode/Thai text normalization (PyThaiNLP-faithful)
 //	stopwords Thai/English stop-word filtering (PyThaiNLP-faithful)
+//	vocab     term → sequential-id vocabulary + DF/IDF for sparse/BM25 indexing
 //	sentence  whitespace sentence splitting (rule-based)
+//	chunk     offset-true hierarchical chunking for RAG ingestion
 //	translit  name-variant matching (MetaSound/Udom83/LK82/CompleteSoundex keys,
 //	          edit distance, SoundIndex)
 //

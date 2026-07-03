@@ -13,6 +13,11 @@
 // The dictionary loads in microseconds via mmap and adds no measurable RAM
 // (vs. ~1.5s / ~200MB for eager in-RAM Go segmenters). The word list is the
 // jieba dictionary (MIT); see NOTICE.
+//
+// Tokens/TokensDP also report each token's byte offsets, relative to the exact
+// string passed to that call — no normalization happens inside these
+// functions, so if you normalize first, offsets point into the string you
+// passed.
 package cjk
 
 import (
@@ -222,11 +227,30 @@ func (s *Segmenter) CutDP(text string) []string {
 // best segmentation's tokens to out. Cost of an unknown single char is a large
 // negative weight so real words are always preferred.
 func (s *Segmenter) dpRun(rs []rune, a, b int, out []string) []string {
+	starts, ok := s.dpStarts(rs, a, b)
+	if !ok { // unweighted custom dict: fall back to longest-match on this run
+		return append(out, s.Cut(string(rs[a:b]))...)
+	}
+	for t, st := range starts {
+		en := b - a
+		if t+1 < len(starts) {
+			en = starts[t+1]
+		}
+		out = append(out, string(rs[a+st:a+en]))
+	}
+	return out
+}
+
+// dpStarts computes the max-probability segmentation of the Han run rs[a:b]
+// and returns each token's start rune index relative to a, ascending (token t
+// spans starts[t]..starts[t+1], the last ending at b-a). ok is false when the
+// dictionary is unweighted — callers fall back to greedy longest-match.
+func (s *Segmenter) dpStarts(rs []rune, a, b int) (starts []int, ok bool) {
 	ft, ok := s.d.(interface {
 		PrefixWeights(text []rune, start int, outLen, outW []int32) ([]int32, []int32)
 	})
-	if !ok { // unweighted custom dict: fall back to longest-match on this run
-		return append(out, s.Cut(string(rs[a:b]))...)
+	if !ok {
+		return nil, false
 	}
 	m := b - a
 	const negInf = int64(-1) << 60
@@ -249,30 +273,26 @@ func (s *Segmenter) dpRun(rs []rune, a, b int, out []string) []string {
 		lens, ws = ft.PrefixWeights(rs, a+i, lens, ws)
 		for t := range lens {
 			end := i + int(lens[t])
+			if end > m {
+				continue // dict word crosses the run end (e.g. into digits): not a candidate
+			}
 			if v := best[i] + int64(ws[t]); v > best[end] {
 				best[end] = v
 				prev[end] = int32(i)
 			}
 		}
 	}
-	// backtrack
-	starts := make([]int, 0, 8)
+	// backtrack (yields starts descending), then reverse to ascending
+	starts = make([]int, 0, 8)
 	for k := m; k > 0; {
 		p := int(prev[k])
 		starts = append(starts, p)
 		k = p
 	}
-	for t := len(starts) - 1; t >= 0; t-- {
-		st := starts[t]
-		var en int
-		if t == 0 {
-			en = m
-		} else {
-			en = starts[t-1]
-		}
-		out = append(out, string(rs[a+st:a+en]))
+	for i, j := 0, len(starts)-1; i < j; i, j = i+1, j-1 {
+		starts[i], starts[j] = starts[j], starts[i]
 	}
-	return out
+	return starts, true
 }
 
 func isHan(r rune) bool {

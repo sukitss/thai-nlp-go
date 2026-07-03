@@ -10,8 +10,10 @@ package dict
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -171,6 +173,64 @@ func (f *FlatTrie) PrefixLens(text []rune, start int, out []int) []int {
 	return out
 }
 
+// WalkPrefix calls fn for every dictionary word starting with prefix (including
+// prefix itself if it is a word), in lexicographic rune order, until fn returns
+// false — e.g. autocompleting glossary entries or expanding a prefix into its
+// dictionary terms. Weights are 0 on an unweighted dictionary. It descends to
+// the prefix node once (binary search per rune), then walks only that subtree;
+// edges are stored rune-sorted, so ordering costs nothing. See Trie.WalkPrefix
+// — the two are interchangeable.
+func (f *FlatTrie) WalkPrefix(prefix string, fn func(word string, weight int32) bool) {
+	var cur uint32
+	word := make([]rune, 0, walkBufCap)
+	for _, r := range prefix {
+		lo, hi := f.edgeStart[cur], f.edgeStart[cur+1]
+		rr := int32(r)
+		found := false
+		for lo < hi {
+			mid := (lo + hi) >> 1
+			v := f.edgeRune[mid]
+			if v == rr {
+				cur = f.edgeTgt[mid]
+				found = true
+				break
+			} else if v < rr {
+				lo = mid + 1
+			} else {
+				hi = mid
+			}
+		}
+		if !found {
+			return
+		}
+		word = append(word, r)
+	}
+	f.walkNode(cur, &word, fn)
+}
+
+// walkNode does a lexicographic DFS below node, reusing one rune buffer for the
+// current word. Returns false as soon as fn does, unwinding the walk.
+func (f *FlatTrie) walkNode(node uint32, word *[]rune, fn func(string, int32) bool) bool {
+	if f.isEnd(node) {
+		var w int32
+		if f.weights != nil {
+			w = f.weights[node]
+		}
+		if !fn(string(*word), w) {
+			return false
+		}
+	}
+	for i := f.edgeStart[node]; i < f.edgeStart[node+1]; i++ {
+		*word = append(*word, rune(f.edgeRune[i]))
+		ok := f.walkNode(f.edgeTgt[i], word, fn)
+		*word = (*word)[:len(*word)-1]
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // Close releases the trie's backing memory (unmapping the mmap region, if any)
 // and invalidates it: lookups after Close panic recoverably (nil-slice index)
 // instead of touching unmapped memory and killing the process with SIGSEGV.
@@ -191,10 +251,26 @@ func (f *FlatTrie) Close() error {
 
 // ---------- build (offline, once) ----------
 
-// BuildFlatFromTrie converts a pointer Trie into the flat CSR format and writes
-// it to path. Run this whenever the dictionary text changes.
-func BuildFlatFromTrie(t *Trie, path string) error {
-	// BFS to assign a stable node index to every trie node.
+// flatSections is the CSR image of a pointer Trie, ready to serialize.
+type flatSections struct {
+	numNodes  int
+	edgeStart []uint32
+	endBits   []uint32
+	edgeRune  []int32
+	edgeTgt   []uint32
+	weights   []int32 // nil when the trie is unweighted
+}
+
+// byteSize is the exact serialized size (header + all sections).
+func (fl *flatSections) byteSize() int {
+	words := len(fl.edgeStart) + len(fl.endBits) + len(fl.edgeRune) + len(fl.edgeTgt) + len(fl.weights)
+	return flatHeaderLen + flatWordBytes*words
+}
+
+// flatten converts a pointer Trie into its flat CSR sections. Node indices are
+// assigned by BFS over rune-sorted children, so the output is deterministic for
+// a given word set.
+func flatten(t *Trie) flatSections {
 	idx := map[*trieNode]uint32{t.root: 0}
 	order := []*trieNode{t.root}
 	for i := 0; i < len(order); i++ {
@@ -208,29 +284,35 @@ func BuildFlatFromTrie(t *Trie, path string) error {
 		}
 	}
 	numNodes := len(order)
-	edgeStart := make([]uint32, numNodes+1)
-	var edgeRune []int32
-	var edgeTgt []uint32
-	endBits := make([]uint32, (numNodes+31)/32)
-	var weights []int32 // only written when the trie is weighted
+	fl := flatSections{
+		numNodes:  numNodes,
+		edgeStart: make([]uint32, numNodes+1),
+		endBits:   make([]uint32, (numNodes+31)/32),
+	}
 	if t.weighted {
-		weights = make([]int32, numNodes)
+		fl.weights = make([]int32, numNodes)
 	}
 	for i, nd := range order {
-		edgeStart[i] = uint32(len(edgeRune))
+		fl.edgeStart[i] = uint32(len(fl.edgeRune))
 		if nd.end {
-			endBits[i>>5] |= 1 << (uint(i) & 31)
+			fl.endBits[i>>5] |= 1 << (uint(i) & 31)
 		}
-		if weights != nil {
-			weights[i] = nd.weight
+		if fl.weights != nil {
+			fl.weights[i] = nd.weight
 		}
 		for _, r := range sortedRunes(nd) {
-			edgeRune = append(edgeRune, int32(r))
-			edgeTgt = append(edgeTgt, idx[nd.children[r]])
+			fl.edgeRune = append(fl.edgeRune, int32(r))
+			fl.edgeTgt = append(fl.edgeTgt, idx[nd.children[r]])
 		}
 	}
-	edgeStart[numNodes] = uint32(len(edgeRune))
+	fl.edgeStart[numNodes] = uint32(len(fl.edgeRune))
+	return fl
+}
 
+// BuildFlatFromTrie converts a pointer Trie into the flat CSR format and writes
+// it to path. Run this whenever the dictionary text changes.
+func BuildFlatFromTrie(t *Trie, path string) error {
+	fl := flatten(t)
 	// Write to a temp file in the same directory, then rename over the target:
 	// atomic on the same filesystem, and flush/close errors are never dropped,
 	// so a failed build cannot leave a truncated .fdt behind.
@@ -239,7 +321,7 @@ func BuildFlatFromTrie(t *Trie, path string) error {
 		return err
 	}
 	tmp := f.Name()
-	if err := writeFlat(f, numNodes, edgeStart, endBits, edgeRune, edgeTgt, weights); err != nil {
+	if err := writeFlat(f, fl); err != nil {
 		f.Close()
 		os.Remove(tmp)
 		return err
@@ -255,25 +337,45 @@ func BuildFlatFromTrie(t *Trie, path string) error {
 	return nil
 }
 
-func writeFlat(f *os.File, numNodes int, edgeStart, endBits []uint32, edgeRune []int32, edgeTgt []uint32, weights []int32) error {
+// WriteFlat serializes the trie to w in the flat CSR format — byte-identical to
+// what BuildFlatFromTrie writes to disk — for persisting a dictionary somewhere
+// other than a local file (object store, database blob). Load it back with
+// FromBytes. Unlike BuildFlatFromTrie there is no atomicity: on error w may
+// have received a partial stream, so write to a staging location and promote
+// only on success.
+func (t *Trie) WriteFlat(w io.Writer) error { return writeFlat(w, flatten(t)) }
+
+// FlatBytes serializes the trie to flat-format bytes in memory (WriteFlat into
+// an exactly-sized buffer). FromBytes(FlatBytes(t)) is lookup-equivalent to t.
+func FlatBytes(t *Trie) ([]byte, error) {
+	fl := flatten(t)
+	var buf bytes.Buffer
+	buf.Grow(fl.byteSize())
+	if err := writeFlat(&buf, fl); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func writeFlat(dst io.Writer, fl flatSections) error {
 	// header reserved field (index 3) flags a trailing weights section, so old
 	// unweighted files (reserved=0) still load unchanged.
 	var flags uint32
-	if weights != nil {
+	if fl.weights != nil {
 		flags = flagWeighted
 	}
-	w := bufio.NewWriter(f)
+	w := bufio.NewWriter(dst)
 	bw := binary.Write
-	if err := bw(w, binary.LittleEndian, []uint32{flatMagic, uint32(numNodes), uint32(len(edgeRune)), flags}); err != nil {
+	if err := bw(w, binary.LittleEndian, []uint32{flatMagic, uint32(fl.numNodes), uint32(len(fl.edgeRune)), flags}); err != nil {
 		return err
 	}
-	for _, section := range []any{edgeStart, endBits, edgeRune, edgeTgt} {
+	for _, section := range []any{fl.edgeStart, fl.endBits, fl.edgeRune, fl.edgeTgt} {
 		if err := bw(w, binary.LittleEndian, section); err != nil {
 			return err
 		}
 	}
-	if weights != nil {
-		if err := bw(w, binary.LittleEndian, weights); err != nil {
+	if fl.weights != nil {
+		if err := bw(w, binary.LittleEndian, fl.weights); err != nil {
 			return err
 		}
 	}

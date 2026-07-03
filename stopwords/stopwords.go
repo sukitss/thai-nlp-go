@@ -177,6 +177,26 @@ func (b *Builder) Build(minDocFraction float64) *Set {
 // Docs reports how many documents were added.
 func (b *Builder) Docs() int { return b.docs }
 
+// DocCount reports how many documents were added. It is an alias of Docs,
+// named to match the vocab package's Builder.
+func (b *Builder) DocCount() int { return b.docs }
+
+// DF reports the document frequency of term: the number of added documents
+// that contained it (0 for unseen terms).
+func (b *Builder) DF(term string) int { return b.df[term] }
+
+// Terms calls fn for every counted term with its document frequency, in
+// unspecified order. Iteration stops early if fn returns false. Useful for
+// exporting the counts (e.g. into a vocab.Builder) instead of thresholding
+// with Build.
+func (b *Builder) Terms(fn func(term string, df int) bool) {
+	for term, df := range b.df {
+		if !fn(term, df) {
+			return
+		}
+	}
+}
+
 // Words returns the set's words, sorted (for inspection/testing).
 func (s *Set) Words() []string {
 	out := make([]string, 0, len(s.m))

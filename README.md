@@ -18,6 +18,7 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | --- | --- | --- |
 | [`dict`](dict) | Shared dictionary (mmap flat trie, one shared instance) | ✅ |
 | [`script`](script) | Split mixed-language text into runs by writing system | ✅ |
+| [`token`](token) | Shared token-with-byte-offsets value used by all tokenizers | ✅ |
 | [`tokenize`](tokenize) | Word segmentation (PyThaiNLP **newmm** port) + char **n-gram** | ✅ |
 | [`cjk`](cjk) | Chinese word segmentation (dictionary maximal-matching) | ✅ |
 | [`jp`](jp) | Japanese word segmentation (dictionary maximal-matching) | ✅ |
@@ -26,7 +27,9 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`multi`](multi) | One-call multilingual tokenization (detect + route th/cn/jp/kr/en) | ✅ |
 | [`normalize`](normalize) | Text normalization (PyThaiNLP-faithful) | ✅ |
 | [`stopwords`](stopwords) | Thai/English stop-word filtering | ✅ |
+| [`vocab`](vocab) | Term → sequential-id vocabulary + DF/IDF (sparse/BM25 indexing) | ✅ |
 | [`sentence`](sentence) | Whitespace sentence splitting (rule-based) | ✅ |
+| [`chunk`](chunk) | Offset-true hierarchical chunking (RAG ingestion) | ✅ |
 | [`translit`](translit) | Name-variant matching (MetaSound phonetic key) | ✅ |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, and
@@ -79,6 +82,30 @@ ng := tokenize.NewNGram(3)
 ng.Split("ฉันรักภาษาไทย")
 ```
 
+#### Token offsets
+
+Search highlighting and entity-mention extraction need to know **where** each
+token sits, not just what it says. Every tokenizer can report byte offsets:
+`Tokens`/`TokensNoWS` (and buffer-reusing `AppendTokens`/`AppendTokensNoWS`)
+return `token.Token{Text, Start, End}` — a tiny zero-dependency leaf package —
+with the guarantee `text[t.Start:t.End] == t.Text` into the exact string you
+passed. The same API exists on `en`, `cjk`, `jp` and `kr` (`Tokens`, plus
+`TokensDP` for cjk/jp), and `script.Run` carries a `Start` offset so per-run
+token positions compose into whole-document positions. No normalization
+happens inside the tokenizers: if you normalize first, offsets point into the
+normalized string you passed, not the original.
+
+```go
+for _, t := range seg.TokensNoWS("ฉันรักภาษาไทย") {
+    highlight(t.Start, t.End) // text[t.Start:t.End] == t.Text
+}
+```
+
+Offsets are ~free: benchmarked in `tokenize/tokens_test.go`, `Tokens` runs
+within a few percent of `Segment`'s throughput over the ~1 MB corpus, and the
+`AppendTokens` reuse path makes fewer allocations than `Segment` (~132k vs
+~219k allocs per corpus pass — one dev-machine snapshot, not asserted in CI).
+
 #### Per-user (cached) dictionaries
 
 `Session` rebuilds its overlay each call. For per-user "dynamic" dictionaries,
@@ -103,6 +130,23 @@ Concurrency: the base dictionary and the overlay `*dict.Trie` are read-only and
 safe to share across goroutines. A `Session`/`SessionWithDict` Segmenter keeps
 per-lookup scratch, so make **one per goroutine** (it's a tiny struct).
 
+`dict.Trie` covers the full lifecycle of a live per-user dictionary: `Remove`
+deletes a word (pruning emptied branches), `Words`/`WalkPrefix` enumerate
+entries in lexicographic order (`WalkPrefix` works on both the mutable trie
+and the flat mmap trie) — e.g. for glossary autocomplete, and `WriteFlat`/`FlatBytes`
+serialize a trie to the same flat format as the embedded dictionary
+(`FromBytes` loads it back), so a user dictionary can persist in an object
+store or database blob. Tries are never safe to mutate while shared: when a
+user edits their words, rebuild (or copy and extend) the overlay and **swap
+the pointer** — in-flight readers keep the old trie until they pick up the
+new one.
+
+Overlays can also carry weights: for a word present in both dictionaries, an
+overlay built with `AddWeighted` **shadows** the base weight (a per-tenant
+glossary can re-weight a base word); an unweighted overlay has no weight
+opinion, so the base weight passes through (documented on
+`OverlayDict.PrefixWeights`).
+
 ## Normalize
 
 Faithful port of PyThaiNLP `normalize()` (rule-based: strip zero-width, collapse
@@ -116,6 +160,15 @@ import "github.com/sukitss/thai-nlp-go/normalize"
 normalize.Normalize("เเปลก")   // "แปลก"  (double Sara E → Sara Ae)
 normalize.Normalize("นานาาา")  // "นานา"  (drop repeated vowels)
 normalize.Normalize("ก    ข")  // "ก ข"   (collapse spaces)
+```
+
+Thai digits are deliberately **not** folded by `Normalize` (PyThaiNLP parity —
+its `normalize()` doesn't fold them either). When an index should treat `๕`
+and `5` as the same term, apply the separate step after normalizing — it
+returns the input string as-is (zero allocation) when there is no Thai digit:
+
+```go
+normalize.DigitsToArabic("บทที่ ๕") // "บทที่ 5"
 ```
 
 For the strongest canonicalization (exact-match / dedup / hashing) use
@@ -220,6 +273,20 @@ Three layers: phonetic-key bucketing + edit-distance ranking + a manual alias
 map. Build it fully once, then it's read-only and safe for concurrent `Lookup`
 across goroutines (phonetic key computation is stateless and allocation-light).
 
+When ids feed a search filter, an unranked list isn't enough — a weak
+sound-alike can drag in the wrong entity. `LookupScored` is `Lookup` with
+scores so you can threshold: each entity scores as the maximum edit-distance
+`Similarity` between the query and its bucket-matched spellings (an exact
+alias hit scores 1.0), and matches below `minSim` are dropped.
+`LookupScored(q, 0)` returns exactly `Lookup(q)`'s ids. `Len` reports how many
+distinct entity ids are registered.
+
+```go
+for _, m := range idx.LookupScored("เนี่ยลี่", 0.8) {
+    // m.ID, m.Score in [0,1] — only confident sound-alikes widen the filter
+}
+```
+
 **Wiring into hybrid (entity-aware) search.** The keyword/sparse side of a hybrid
 retriever matches exact tokens, so a query in one spelling misses documents that
 use another. Bridge them with `SoundIndex`:
@@ -279,9 +346,116 @@ buf = multi.AppendBytes(buf[:0], text, ' ')   // output into a reused buffer for
 
 Thai → newmm, Chinese → cjk, Japanese → jp, Korean → kr, Latin → en. CJK runs
 keep kanji+kana together and route to Japanese when kana is present, else Chinese
-(`multi.DefaultHan` sets the pure-Han default). Importing `multi` embeds all
-language dictionaries (loaded lazily per language on first use); import single
-packages if you only need some.
+(`multi.DefaultHan` sets the pure-Han default — a mutable process-wide global;
+`Analyzer.Han` below carries the choice per value instead). Importing `multi`
+embeds all language dictionaries (loaded lazily per language on first use);
+import single packages if you only need some.
+
+## One pipeline for documents and queries
+
+A keyword/sparse index only works when documents and queries are analyzed by
+**exactly** the same pipeline — any asymmetry (stop words applied on one side,
+digits folded on one side, a per-user word recognized at ingest but not at
+query time) silently breaks retrieval. `multi.Analyzer` holds the whole
+pipeline in one value: normalize → optional Thai-digit folding → script
+routing → per-run tokenizers (with a per-tenant dictionary overlay on Thai
+runs) → stop-word / Latin case-fold post-filters. Configure it once per
+tenant and share it: an `Analyzer` is immutable in use and **safe for
+concurrent use** across request goroutines, and the zero value behaves exactly
+like `multi.Segment` (asserted by tests).
+
+```go
+glossary := dict.NewTrie() // per-tenant words: character names, product codes
+glossary.Add("อาริน")
+
+a := &multi.Analyzer{
+    Overlay:        glossary,
+    Stop:           stopwords.Union(stopwords.Default(), stopwords.English()),
+    LowerLatin:     true,             // fold Latin case in Terms output
+    FoldThaiDigits: true,             // "๕" indexes as "5"
+    Han:            multi.HanChinese, // ambiguous all-kanji runs → Chinese
+}
+
+a.Terms("อารินอ่าน The Book บทที่ ๕") // same call for ingest and query
+buf = a.AppendTerms(buf[:0], doc, ' ') // reused buffer on the indexing path
+
+norm, toks := a.Tokens(query)          // highlighting path
+_ = norm[toks[0].Start : toks[0].End]  // == toks[0].Text, always
+```
+
+`Tokens` runs the same pipeline but keeps every token — no stop-word dropping,
+no lowercasing (filtering the highlight path would hide matches) — and returns
+the **normalized** string its offsets index into. Offsets are not positions in
+your original argument (Normalize collapses spaces and reorders marks;
+digit folding changes byte lengths): highlight against `norm`, or store `norm`
+alongside the offsets. Filter order (`LowerLatin` folds first, then `Stop` is
+checked against the folded term, with the acronym caveat that entails) is
+documented on the struct fields.
+
+## Chunking for RAG ingestion
+
+`chunk` splits text into embedding-sized pieces while keeping exact byte
+offsets into the source — `input[c.Start:c.End] == c.Text` always holds,
+overlaps included — so every chunk stays citable and highlightable after
+retrieval. Splitting is hierarchical, tuned for Thai prose (no sentence-final
+punctuation; novels put one paragraph per line): paragraphs first (line
+breaks), oversized paragraphs by sentence with whole sentences packed
+greedily, and only a single sentence that alone exceeds the budget is
+hard-cut at rune boundaries — never immediately before a Thai combining mark,
+so a mark is never split from its base.
+
+```go
+import "github.com/sukitss/thai-nlp-go/chunk"
+
+chunks, err := chunk.Split(doc, chunk.Options{
+    MaxUnits:     512,
+    OverlapUnits: 64,          // whole-sentence overlap, contiguous source text
+    Measure:      countTokens, // your unit, e.g. an LLM token counter; nil = runes
+    Sentences:    crf.Split,   // optional: higher-quality Thai boundaries
+})
+```
+
+Chunk sizes are measured in units *you* define. `Measure` may be an expensive
+LLM tokenizer, so the algorithm is built around calling it sparingly: once per
+paragraph, once per sentence, and O(log runes) times per hard-cut piece
+(binary search instead of re-measuring every prefix). Overlap is whole
+previous sentences only — never partial — so overlapped `[Start,End)` ranges
+are real contiguous source text. `chunk` deliberately does not import
+`sentence/crf` (that would embed the ~2 MB model for everyone); pass
+`crf.Split` yourself, and every `Sentences` result is validated with fallback
+to the built-in whitespace splitter on any mismatch. The full contract —
+whitespace rule, overlap accounting, the unsplittable-piece exception, Measure
+additivity — is specified in the package documentation and asserted by tests.
+
+## Vocabulary for sparse retrieval
+
+`vocab` maps terms to dense sequential ids (0, 1, 2, …) and tracks document
+frequency — the term-dictionary mechanism classic lexical engines
+(Lucene/Elasticsearch-style term dictionaries) use behind BM25 and
+sparse-vector scoring. The reason it exists instead of the tempting shortcut,
+hashing terms to dimensions: a 32-bit hash over an unbounded term space
+collides, and a collision makes a query for one term match documents
+containing an unrelated term — silent score corruption you can't detect from
+the vectors. Sequential assignment is collision-free by construction, and
+`Len()` is the exact dimension count.
+
+```go
+b := vocab.NewBuilder()
+for _, doc := range corpus {
+    b.AddDoc(a.Terms(doc)) // DF counted once per distinct term per document
+}
+b.IDF("ภาษาไทย")  // BM25 idf: ln(1 + (N-df+0.5)/(df+0.5))
+b.Save(w)         // versioned binary snapshot, deterministic output
+
+v, _ := vocab.Load(r) // immutable, safe for concurrent readers
+id, ok := v.ID("ภาษาไทย")
+b2 := v.Extend()      // resume building — existing ids never change
+```
+
+`Load` validates the whole snapshot (magic, version, counts vs size, DF
+bounds, duplicate terms, trailing bytes) and returns an error on corrupt input
+instead of panicking. Where the snapshot lives and how it synchronizes across
+processes is deliberately your policy — the package is the mechanism.
 
 ## Multilingual routing (manual)
 
@@ -306,6 +480,11 @@ It is script itemization (Unicode UAX #24), not language detection. Decided by
 direct Unicode range checks — **no tables to load, no init cost** (~µs, stateless,
 concurrency-safe). Common characters (spaces/punctuation/digits) attach to their
 neighbor so runs don't fragment.
+
+Each `Run` carries `Start`, its byte offset in the input
+(`input[r.Start:r.Start+len(r.Text)] == r.Text` for valid UTF-8), so per-run
+token offsets compose into whole-document positions. 0.x note: the added field
+breaks positional composite literals `Run{script, text}` — use field names.
 
 Then route each run to its tokenizer — e.g. Chinese runs to [`cjk`](cjk):
 

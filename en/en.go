@@ -5,11 +5,18 @@
 //
 // It is the Latin-run tokenizer in the multilingual routing story: split a
 // mixed document with the script package, then send Latin runs here.
+//
+// Tokens also reports each token's byte offsets, relative to the exact string
+// passed to that call — no normalization happens inside these functions, so if
+// you normalize (or lowercase) first, offsets point into the string you passed.
 package en
 
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
+
+	"github.com/sukitss/thai-nlp-go/token"
 )
 
 // Cut splits text into word tokens: maximal runs of letters/digits (and word-
@@ -52,6 +59,43 @@ func CutLower(text string) []string {
 		toks[i] = strings.ToLower(t)
 	}
 	return toks
+}
+
+// Tokens is Cut with byte offsets: the same token boundaries, each with its
+// half-open byte range in text. Token.Text is the raw input slice in ORIGINAL
+// casing — CutLower's lowercasing is NOT applied here (lowercase yourself if
+// you need the folded form; offsets still point at the original bytes).
+// text[t.Start:t.End] == t.Text always holds, and Tokens(text)[i].Text ==
+// Cut(text)[i] exactly (word tokens never contain invalid UTF-8, which is
+// treated as a separator by both).
+func Tokens(text string) []token.Token {
+	out := make([]token.Token, 0, len(text)/6+1)
+	for i := 0; i < len(text); {
+		r, sz := utf8.DecodeRuneInString(text[i:])
+		if !isWord(r) {
+			i += sz
+			continue
+		}
+		j := i + sz
+		for j < len(text) {
+			r2, sz2 := utf8.DecodeRuneInString(text[j:])
+			if isWord(r2) {
+				j += sz2
+				continue
+			}
+			// keep a single internal ' or - if flanked by word chars
+			if (r2 == '\'' || r2 == '-') && j+sz2 < len(text) {
+				if r3, sz3 := utf8.DecodeRuneInString(text[j+sz2:]); isWord(r3) {
+					j += sz2 + sz3
+					continue
+				}
+			}
+			break
+		}
+		out = append(out, token.Token{Text: text[i:j], Start: i, End: j})
+		i = j
+	}
+	return out
 }
 
 func isWord(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }

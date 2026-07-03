@@ -18,6 +18,10 @@
 // particle analysis needs a morphological dictionary (mecab-ko) and is on the
 // roadmap. This package stays dictionary-free, so it costs no memory and is
 // concurrency-safe.
+//
+// Tokens also reports each token's byte offsets, relative to the exact string
+// passed to that call — no normalization happens inside these functions, so if
+// you normalize first, offsets point into the string you passed.
 package kr
 
 import (

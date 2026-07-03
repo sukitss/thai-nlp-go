@@ -21,6 +21,15 @@ type Prefixer interface {
 	PrefixLens(text []rune, start int, out []int) []int
 }
 
+// Weighter is the weighted companion of Prefixer: PrefixWeights reports the
+// same rune-lengths with each matched word's weight alongside (0 where the
+// dictionary carries no weight), for DAG/maximum-probability segmentation.
+// outLen and outW are reset, kept in sync and reused. Trie and FlatTrie
+// implement it.
+type Weighter interface {
+	PrefixWeights(text []rune, start int, outLen, outW []int32) ([]int32, []int32)
+}
+
 // embeddedFDT is the flat-trie form of the PyThaiNLP words_th dictionary
 // (62,102 words), built with BuildFlatFromTrie from data/words_th.txt.
 // Source: https://github.com/PyThaiNLP/pythainlp (corpus/words_th.txt, CC0-1.0).

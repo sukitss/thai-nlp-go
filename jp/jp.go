@@ -12,6 +12,11 @@
 // The dictionary (SudachiDict small, Apache-2.0) compiles to a ~9MB flat trie
 // that mmaps in microseconds with ~no resident RAM. Non-Japanese characters
 // (Latin, digits, …) are emitted as their own maximal runs. See NOTICE.
+//
+// Tokens/TokensDP also report each token's byte offsets, relative to the exact
+// string passed to that call — no normalization happens inside these
+// functions, so if you normalize first, offsets point into the string you
+// passed.
 package jp
 
 import (
@@ -234,11 +239,30 @@ func (s *Segmenter) CutDP(text string) []string {
 }
 
 func (s *Segmenter) dpRun(rs []rune, a, b int, out []string) []string {
+	starts, ok := s.dpStarts(rs, a, b)
+	if !ok {
+		return append(out, s.Cut(string(rs[a:b]))...)
+	}
+	for t, st := range starts {
+		en := b - a
+		if t+1 < len(starts) {
+			en = starts[t+1]
+		}
+		out = append(out, string(rs[a+st:a+en]))
+	}
+	return out
+}
+
+// dpStarts computes the max-probability segmentation of the Japanese run
+// rs[a:b] and returns each token's start rune index relative to a, ascending
+// (token t spans starts[t]..starts[t+1], the last ending at b-a). ok is false
+// when the dictionary is unweighted — callers fall back to greedy longest-match.
+func (s *Segmenter) dpStarts(rs []rune, a, b int) (starts []int, ok bool) {
 	ft, ok := s.d.(interface {
 		PrefixWeights(text []rune, start int, outLen, outW []int32) ([]int32, []int32)
 	})
 	if !ok {
-		return append(out, s.Cut(string(rs[a:b]))...)
+		return nil, false
 	}
 	m := b - a
 	const negInf = int64(-1) << 60
@@ -260,27 +284,26 @@ func (s *Segmenter) dpRun(rs []rune, a, b int, out []string) []string {
 		lens, ws = ft.PrefixWeights(rs, a+i, lens, ws)
 		for t := range lens {
 			end := i + int(lens[t])
+			if end > m {
+				continue // dict word crosses the run end (e.g. into digits): not a candidate
+			}
 			if v := best[i] + int64(ws[t]); v > best[end] {
 				best[end] = v
 				prev[end] = int32(i)
 			}
 		}
 	}
-	starts := make([]int, 0, 8)
+	// backtrack (yields starts descending), then reverse to ascending
+	starts = make([]int, 0, 8)
 	for k := m; k > 0; {
 		p := int(prev[k])
 		starts = append(starts, p)
 		k = p
 	}
-	for t := len(starts) - 1; t >= 0; t-- {
-		st := starts[t]
-		en := m
-		if t != 0 {
-			en = starts[t-1]
-		}
-		out = append(out, string(rs[a+st:a+en]))
+	for i, j := 0, len(starts)-1; i < j; i, j = i+1, j-1 {
+		starts[i], starts[j] = starts[j], starts[i]
 	}
-	return out
+	return starts, true
 }
 
 // CutDP segments Japanese text with the shared dictionary using DAG + DP.

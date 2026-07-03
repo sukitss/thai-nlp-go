@@ -65,6 +65,22 @@ func (x *SoundIndex) Alias(surface, id string) {
 	x.aliases[surface] = e
 }
 
+// Match is one scored Lookup result: an entity id and its similarity to the
+// query in [0,1] (1 = exact surface or alias match).
+type Match struct {
+	ID    string
+	Score float64
+}
+
+// Len returns the number of distinct entity ids registered via Add/Alias.
+func (x *SoundIndex) Len() int {
+	seen := map[string]struct{}{}
+	for _, e := range x.entries {
+		seen[e.id] = struct{}{}
+	}
+	return len(seen)
+}
+
 // Lookup returns the entity ids whose spellings sound like query, most similar
 // first (by edit-distance similarity to query). An exact alias match ranks top.
 // Queries longer than MaxSoundLen runes return no matches: this bounds the
@@ -108,4 +124,57 @@ func (x *SoundIndex) Lookup(query string) []string {
 		return ids[i] < ids[j] // stable
 	})
 	return ids
+}
+
+// LookupScored is Lookup with scores, so callers can threshold out weak
+// matches. Candidates are generated exactly like Lookup (phonetic buckets +
+// exact alias). Each entity scores as the maximum Similarity between query and
+// the entity's bucket-matched surfaces; an exact alias hit scores 1.0. Only
+// matches with Score >= minSim are returned, sorted Score descending then ID
+// ascending (deterministic), one Match per entity id even when it is reachable
+// via several buckets or spellings. As in Lookup, candidates whose similarity
+// is 0 are dropped, so LookupScored(query, 0) returns exactly Lookup's ids.
+// Queries longer than MaxSoundLen runes return nil (same cost bound as
+// Lookup). Read-only: safe for concurrent use once the index is built.
+func (x *SoundIndex) LookupScored(query string, minSim float64) []Match {
+	if query == "" || tooLongForSound(query) {
+		return nil
+	}
+	// best similarity per entry index among candidates
+	best := map[int]float64{}
+	if e, ok := x.aliases[query]; ok {
+		best[e] = 1 // exact alias match
+	}
+	for _, k := range bucketKeys(query) {
+		for _, e := range x.buckets[k] {
+			s := Similarity(query, x.entries[e].name)
+			if s > best[e] {
+				best[e] = s
+			}
+		}
+	}
+	// best score per id, then threshold
+	idScore := map[string]float64{}
+	for e, s := range best {
+		id := x.entries[e].id
+		if s > idScore[id] {
+			idScore[id] = s
+		}
+	}
+	out := make([]Match, 0, len(idScore))
+	for id, s := range idScore {
+		if s >= minSim {
+			out = append(out, Match{ID: id, Score: s})
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score // higher similarity first
+		}
+		return out[i].ID < out[j].ID // stable
+	})
+	return out
 }

@@ -8,6 +8,10 @@
 // are NO large tables to load and no init cost. SplitByScript is a pure function
 // (stateless, safe for concurrent use) and allocates only its result.
 //
+// Each Run carries its byte offset (Run.Start) into the exact string passed to
+// SplitByScript — no normalization happens inside, so if you normalize first,
+// offsets are relative to the normalized string you passed.
+//
 // Note: this is script itemization (Unicode UAX #24), not language detection —
 // "Han" covers Chinese and Japanese kanji, "Latin" covers many languages. For
 // tokenizer routing that is usually enough; add language detection if you must
@@ -55,6 +59,15 @@ func (s Script) String() string {
 type Run struct {
 	Script Script
 	Text   string
+	// Start is the byte offset of the run's first byte in the string passed to
+	// SplitByScript (no normalization happens inside; offsets are relative to
+	// that exact call's input). For valid UTF-8 input,
+	// input[Start:Start+len(Text)] == Text; invalid bytes are substituted with
+	// U+FFFD in Text, while Start still points at the original byte.
+	//
+	// NOTE (0.x breaking-lite): adding this field breaks positional composite
+	// literals (Run{script, text}) — use field names.
+	Start int
 }
 
 // ScriptOf returns the script category of a single rune.
@@ -88,31 +101,33 @@ func SplitByScript(text string) []Run {
 	var runs []Run
 	var b strings.Builder
 	cur := Common // "no script decided yet" — the first real script claims the run
+	start := 0    // byte offset (in text) of the current run's first rune
 	flush := func() {
 		if b.Len() > 0 {
 			s := cur
 			if s == Common {
 				s = Other // a run of only common chars
 			}
-			runs = append(runs, Run{Script: s, Text: b.String()})
+			runs = append(runs, Run{Script: s, Text: b.String(), Start: start})
 			b.Reset()
 		}
 	}
-	for _, r := range text {
+	for i, r := range text {
 		s := ScriptOf(r)
 		switch {
 		case s == Common:
-			b.WriteRune(r) // stick with the current run
+			// stick with the current run
 		case cur == Common: // first real script in this run
 			cur = s
-			b.WriteRune(r)
 		case s == cur:
-			b.WriteRune(r)
 		default: // script change → new run
 			flush()
 			cur = s
-			b.WriteRune(r)
 		}
+		if b.Len() == 0 {
+			start = i
+		}
+		b.WriteRune(r)
 	}
 	flush()
 	return runs

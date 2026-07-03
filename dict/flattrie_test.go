@@ -1,10 +1,13 @@
 package dict
 
 import (
+	"bytes"
 	"encoding/binary"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -272,3 +275,139 @@ func FuzzFromBytes(f *testing.F) {
 		_ = outW
 	})
 }
+
+// uniqueSampleWords returns sampleWords deduplicated (the crafted words can
+// collide with the sampled ones), preserving first-seen order.
+func uniqueSampleWords(t *testing.T) []string {
+	t.Helper()
+	words := sampleWords(t)
+	seen := make(map[string]bool, len(words))
+	out := make([]string, 0, len(words))
+	for _, w := range words {
+		if !seen[w] {
+			seen[w] = true
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// TestWriteFlatMatchesBuildFile: WriteFlat and FlatBytes must produce exactly
+// the bytes BuildFlatFromTrie writes to disk, for empty, unweighted and
+// weighted tries.
+func TestWriteFlatMatchesBuildFile(t *testing.T) {
+	unweighted := NewTrie()
+	weighted := NewTrie()
+	for i, w := range []string{"ก", "กา", "กาแฟ", "แฟน", "a", "ab", "1", "๑๒๓"} {
+		unweighted.Add(w)
+		weighted.AddWeighted(w, int32(i)-3)
+	}
+	for name, tr := range map[string]*Trie{"empty": NewTrie(), "unweighted": unweighted, "weighted": weighted} {
+		file := buildFlatBytes(t, tr)
+		var buf bytes.Buffer
+		if err := tr.WriteFlat(&buf); err != nil {
+			t.Fatalf("%s: WriteFlat: %v", name, err)
+		}
+		if !bytes.Equal(buf.Bytes(), file) {
+			t.Errorf("%s: WriteFlat differs from BuildFlatFromTrie file (%d vs %d bytes)", name, buf.Len(), len(file))
+		}
+		fb, err := FlatBytes(tr)
+		if err != nil {
+			t.Fatalf("%s: FlatBytes: %v", name, err)
+		}
+		if !bytes.Equal(fb, file) {
+			t.Errorf("%s: FlatBytes differs from BuildFlatFromTrie file (%d vs %d bytes)", name, len(fb), len(file))
+		}
+	}
+}
+
+// TestFlatBytesRoundTrip: FromBytes(FlatBytes(t)) must be lookup-equivalent to
+// the pointer trie across the whole read API, on a diverse word set
+// (Thai/Latin/digits/single-rune/long/shared-prefix — see sampleWords).
+func TestFlatBytesRoundTrip(t *testing.T) {
+	words := uniqueSampleWords(t)
+	tr := NewTrie()
+	for i, w := range words {
+		if i%3 == 0 {
+			tr.Add(w) // mixed unweighted words keep weight 0
+		} else {
+			tr.AddWeighted(w, int32(i)-50)
+		}
+	}
+	data, err := FlatBytes(tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ft, err := FromBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ft.Weighted() != tr.Weighted() {
+		t.Fatalf("Weighted() = %v, want %v", ft.Weighted(), tr.Weighted())
+	}
+
+	// every word the trie enumerates must round-trip with its weight...
+	n := 0
+	tr.Words(func(w string, wt int32) bool {
+		n++
+		got, ok := ft.Weight(w)
+		if !ok || got != wt {
+			t.Errorf("flat Weight(%q) = (%d,%v), want (%d,true)", w, got, ok, wt)
+		}
+		return true
+	})
+	if n != tr.Len() || n != len(words) {
+		t.Fatalf("Words enumerated %d, Len = %d, added %d", n, tr.Len(), len(words))
+	}
+	// ...and the flat side must enumerate exactly the same set back
+	m := 0
+	ft.WalkPrefix("", func(w string, wt int32) bool {
+		m++
+		got, ok := tr.Weight(w)
+		if !ok || got != wt {
+			t.Errorf("trie Weight(%q) = (%d,%v), want (%d,true)", w, got, ok, wt)
+		}
+		return true
+	})
+	if m != n {
+		t.Fatalf("flat enumerates %d words, trie %d", m, n)
+	}
+
+	for _, w := range []string{"", "z", "ไม่มีในพจนานุกรมแน่นอน", "abcdefgh"} {
+		if tr.Contains(w) != ft.Contains(w) {
+			t.Errorf("Contains(%q): trie %v, flat %v", w, tr.Contains(w), ft.Contains(w))
+		}
+	}
+
+	// PrefixLens / PrefixWeights parity at every position of a mixed corpus
+	corpus := []rune(strings.Join(words[:60], "") + "zzไม่มีqq")
+	var wantL, gotL []int
+	var wantL32, wantW, gotL32, gotW []int32
+	for s := 0; s < len(corpus); s++ {
+		wantL = tr.PrefixLens(corpus, s, wantL)
+		gotL = ft.PrefixLens(corpus, s, gotL)
+		if !slices.Equal(wantL, gotL) {
+			t.Fatalf("PrefixLens at %d: flat %v, trie %v", s, gotL, wantL)
+		}
+		wantL32, wantW = tr.PrefixWeights(corpus, s, wantL32, wantW)
+		gotL32, gotW = ft.PrefixWeights(corpus, s, gotL32, gotW)
+		if !slices.Equal(wantL32, gotL32) || !slices.Equal(wantW, gotW) {
+			t.Fatalf("PrefixWeights at %d: flat (%v,%v), trie (%v,%v)", s, gotL32, gotW, wantL32, wantW)
+		}
+	}
+}
+
+// TestWriteFlatPropagatesWriterError: a failing writer must surface its error.
+func TestWriteFlatPropagatesWriterError(t *testing.T) {
+	tr := NewTrie()
+	tr.Add("กาแฟ")
+	if err := tr.WriteFlat(failWriter{}); err == nil {
+		t.Fatal("WriteFlat(failWriter) = nil error")
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errWriteFail }
+
+var errWriteFail = errors.New("write failed")
