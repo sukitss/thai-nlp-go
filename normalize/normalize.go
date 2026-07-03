@@ -51,8 +51,7 @@ func rangeExcept(lo, hi rune, except ...rune) string {
 
 // Compiled patterns (built once).
 var (
-	reNewlines = regexp.MustCompile(`[ \n]*\n[ \n]*`)
-	reToneRun  = regexp.MustCompile("[" + tonemarks + "]+")
+	reToneRun = regexp.MustCompile("[" + tonemarks + "]+")
 
 	// reorder pairs (applied once each, in order)
 	reOrder2 = regexp.MustCompile("([" + tonemarks + "์]+)([" + aboveV + belowV + "]+)")
@@ -64,22 +63,15 @@ var (
 	reDanglingStart = regexp.MustCompile("^[" + danglings + "]+")
 	reDanglingSpace = regexp.MustCompile(" +[" + danglings + "]+")
 
-	// no-repeat: one per char in noRepeat, "(ch *)+ch" -> "ch"
-	noRepeatRules = buildNoRepeat()
+	noRepeatSet = buildSet(noRepeat)
 )
 
-type reRule struct {
-	re *regexp.Regexp
-	ch string
-}
-
-func buildNoRepeat() []reRule {
-	var rules []reRule
-	for _, ch := range noRepeat {
-		c := regexp.QuoteMeta(string(ch))
-		rules = append(rules, reRule{regexp.MustCompile("(" + c + "[ ]*)+" + c), string(ch)})
+func buildSet(s string) map[rune]bool {
+	m := make(map[rune]bool, len(s))
+	for _, r := range s {
+		m[r] = true
 	}
-	return rules
+	return m
 }
 
 // Normalize returns the canonical form of text (see package doc for the rules).
@@ -130,14 +122,34 @@ func RemoveZW(text string) string {
 	return text
 }
 
-// RemoveDupSpaces collapses repeated spaces to one and blank/space-padded
-// newlines to a single newline, then trims surrounding whitespace.
+// RemoveDupSpaces collapses each run of spaces/newlines to a single character
+// (a newline if the run contained one, else a space), then trims surrounding
+// whitespace. Single O(n) pass.
 func RemoveDupSpaces(text string) string {
-	for strings.Contains(text, "  ") {
-		text = strings.ReplaceAll(text, "  ", " ")
+	rs := []rune(text)
+	out := make([]rune, 0, len(rs))
+	for i := 0; i < len(rs); {
+		if rs[i] == ' ' || rs[i] == '\n' {
+			hasNL := false
+			j := i
+			for j < len(rs) && (rs[j] == ' ' || rs[j] == '\n') {
+				if rs[j] == '\n' {
+					hasNL = true
+				}
+				j++
+			}
+			if hasNL {
+				out = append(out, '\n')
+			} else {
+				out = append(out, ' ')
+			}
+			i = j
+			continue
+		}
+		out = append(out, rs[i])
+		i++
 	}
-	text = reNewlines.ReplaceAllString(text, "\n")
-	return strings.TrimSpace(text)
+	return strings.TrimSpace(string(out))
 }
 
 // RemoveSpacesBeforeMarks removes a single space that sits between a consonant
@@ -166,30 +178,88 @@ func RemoveSpacesBeforeMarks(text string) string {
 // repeated vowels/signs and collapses repeated tone marks to the last one.
 func RemoveRepeatVowels(text string) string {
 	text = reorderVowels(text)
-	for _, r := range noRepeatRules {
-		text = r.re.ReplaceAllString(text, r.ch)
+	text = collapseRepeats(text)
+	// collapse a run of tone marks to its last mark (only if any tone mark present)
+	if strings.ContainsAny(text, tonemarks) {
+		text = reToneRun.ReplaceAllStringFunc(text, func(m string) string {
+			r := []rune(m)
+			return string(r[len(r)-1])
+		})
 	}
-	// collapse a run of tone marks to its last mark
-	text = reToneRun.ReplaceAllStringFunc(text, func(m string) string {
-		r := []rune(m)
-		return string(r[len(r)-1])
-	})
 	return text
 }
 
+// collapseRepeats replaces a repeated vowel/sign — the same character repeated,
+// optionally separated by spaces — with a single one, dropping the intervening
+// characters and spaces. It ports the per-character PyThaiNLP rules
+// "(ch[ ]*)+ch" -> "ch" as one left-to-right pass (tone marks are handled
+// separately). Trailing spaces after the last repeat are preserved.
+func collapseRepeats(text string) string {
+	rs := []rune(text)
+	out := make([]rune, 0, len(rs))
+	for i := 0; i < len(rs); i++ {
+		r := rs[i]
+		if noRepeatSet[r] {
+			last := i
+			for k := i + 1; k < len(rs); {
+				s := k
+				for s < len(rs) && rs[s] == ' ' {
+					s++
+				}
+				if s < len(rs) && rs[s] == r {
+					last = s
+					k = s + 1
+				} else {
+					break
+				}
+			}
+			out = append(out, r)
+			i = last // skip the collapsed repeats (and spaces between them)
+			continue
+		}
+		out = append(out, r)
+	}
+	return string(out)
+}
+
+// reorderVowels applies the reorder rules, each guarded by a cheap check so its
+// regex only runs when the triggering characters are actually present.
 func reorderVowels(text string) string {
-	text = strings.ReplaceAll(text, "เเ", "แ")         // Sara E + Sara E -> Sara Ae
-	text = reOrder2.ReplaceAllString(text, "${2}${1}") // TONE + ABV/BLW vowel -> vowel + TONE
-	text = reOrder3.ReplaceAllString(text, "${1}ำ")    // Nikhahit + TONE* + Sara Aa -> TONE* + Sara Am
-	text = reOrder4.ReplaceAllString(text, "${2}${1}") // FOLLOW vowel + TONE -> TONE + FOLLOW vowel
-	text = reOrder5.ReplaceAllString(text, "${1}า")    // Lakkhangyao -> Sara Aa (except after ฤ/ฦ)
+	if strings.Contains(text, "เเ") { // Sara E + Sara E -> Sara Ae
+		text = strings.ReplaceAll(text, "เเ", "แ")
+	}
+	if strings.ContainsAny(text, tonemarks+"์") && strings.ContainsAny(text, aboveV+belowV) {
+		text = reOrder2.ReplaceAllString(text, "${2}${1}") // TONE + ABV/BLW vowel -> vowel + TONE
+	}
+	if strings.ContainsRune(text, 'ํ') {
+		text = reOrder3.ReplaceAllString(text, "${1}ำ") // Nikhahit + TONE* + Sara Aa -> TONE* + Sara Am
+	}
+	if strings.ContainsAny(text, followV) && strings.ContainsAny(text, tonemarks) {
+		text = reOrder4.ReplaceAllString(text, "${2}${1}") // FOLLOW vowel + TONE -> TONE + FOLLOW vowel
+	}
+	if strings.ContainsRune(text, 'ๅ') {
+		text = reOrder5.ReplaceAllString(text, "${1}า") // Lakkhangyao -> Sara Aa (except after ฤ/ฦ)
+	}
 	return text
 }
 
 // RemoveDangling removes combining marks that have no base character: at the
 // start of the text, or immediately after a space.
 func RemoveDangling(text string) string {
-	text = reDanglingStart.ReplaceAllString(text, "")
-	text = reDanglingSpace.ReplaceAllString(text, " ")
+	// remove dangling marks at the very start
+	if r := firstRune(text); r != 0 && strings.ContainsRune(danglings, r) {
+		text = reDanglingStart.ReplaceAllString(text, "")
+	}
+	// remove dangling marks right after a space
+	if strings.Contains(text, " ") {
+		text = reDanglingSpace.ReplaceAllString(text, " ")
+	}
 	return text
+}
+
+func firstRune(s string) rune {
+	for _, r := range s {
+		return r
+	}
+	return 0
 }
