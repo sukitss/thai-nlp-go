@@ -34,6 +34,13 @@ project and released under the Creative Commons Attribution 4.0 International
 License (CC-BY-4.0): https://creativecommons.org/licenses/by/4.0/
 ================================================================================
 
-With gratitude to the PyThaiNLP maintainers and contributors for their work on
-Thai NLP, released openly for everyone. This port is offered back in the same
-spirit.
+================================================================================
+Bundled Chinese dictionary: cjk/data/zh.fdt is a flat-trie build of the word
+list from the jieba project (https://github.com/fxsjy/jieba), licensed under the
+MIT License (Copyright (c) 2013 Sun Junyi). Only the word entries are used
+(compiled into a memory-mappable trie); the jieba code itself is not included.
+================================================================================
+
+With gratitude to the PyThaiNLP maintainers and contributors, and to the jieba
+project, for their work released openly for everyone. This library is offered
+back in the same spirit.

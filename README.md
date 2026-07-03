@@ -19,6 +19,7 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`dict`](dict) | Shared dictionary (mmap flat trie, one shared instance) | ✅ |
 | [`script`](script) | Split mixed-language text into runs by writing system | ✅ |
 | [`tokenize`](tokenize) | Word segmentation (PyThaiNLP **newmm** port) + char **n-gram** | ✅ |
+| [`cjk`](cjk) | Chinese word segmentation (dictionary maximal-matching) | ✅ |
 | [`normalize`](normalize) | Text normalization (PyThaiNLP-faithful) | ✅ |
 | [`stopwords`](stopwords) | Thai/English stop-word filtering | ✅ |
 | [`sentence`](sentence) | Whitespace sentence splitting (rule-based) | ✅ |
@@ -260,6 +261,22 @@ It is script itemization (Unicode UAX #24), not language detection. Decided by
 direct Unicode range checks — **no tables to load, no init cost** (~µs, stateless,
 concurrency-safe). Common characters (spaces/punctuation/digits) attach to their
 neighbor so runs don't fragment.
+
+Then route each run to its tokenizer — e.g. Chinese runs to [`cjk`](cjk):
+
+```go
+import "github.com/sukitss/thai-nlp-go/cjk"
+
+cjk.Cut("我爱自然语言处理") // ["我" "爱" "自然语言" "处理"]
+```
+
+`cjk` does Chinese word segmentation by forward maximal-matching over an embedded
+dictionary (the jieba word list, MIT), with single-character fallback for OOV —
+enough for BM25/keyword indexing, where segmentation accuracy has only a minor
+effect on retrieval. It reuses the flat-mmap trie, so it loads in **microseconds
+with ~no RAM** (vs ~1.5s / ~200MB for eager in-RAM Go segmenters) and is pure Go,
+no CGo, no neural model. (Japanese/Korean are on the roadmap; Korean text with
+its eojeol spaces already tokenizes acceptably by whitespace.)
 
 ### CLI
 
