@@ -2,10 +2,15 @@
 // filtering for lexical stages such as BM25/keyword weighting and keyword
 // extraction, where very common words are noise rather than signal.
 //
-// The Thai set is faithful to PyThaiNLP's thai_stopwords() (1,030 words). The
-// English set is a compact list of common function words (override it if you
-// need a specific one). Sets are read-only after construction and safe for
-// concurrent reads; the shared Default/English instances are loaded once.
+// The Thai set is derived from PyThaiNLP's thai_stopwords() but cleaned for
+// robustness: every word is Unicode-normalized (see the normalize package) so
+// tone-vowel encodings are canonical, duplicates that differed only by encoding
+// (e.g. composed "ำ" vs decomposed "ํ"+"า") are merged, and a stray BOM entry is
+// dropped — 1,027 words vs the raw 1,030. Normalize your input the same way for
+// consistent matching (tokens from normalized text already are). The English set
+// is a compact list of common function words (override it if you need a specific
+// one). Sets are read-only after construction and safe for concurrent reads; the
+// shared Default/English instances are loaded once.
 //
 // Matching is exact and case-sensitive, which keeps latin acronyms distinct
 // from stop words: "it" is a stop word, "IT" is not. Lower-case your ordinary

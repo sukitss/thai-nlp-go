@@ -116,7 +116,7 @@ Note: it does **not** apply Unicode NFC — compose that separately if needed.
 
 ## Stopwords
 
-Thai stop-word set faithful to PyThaiNLP `thai_stopwords()` (1,030 words), plus a
+Thai stop-word set faithful to PyThaiNLP `thai_stopwords()` (1,027 words), plus a
 common English set. Matching is case-sensitive, so latin acronyms stay distinct
 (`it` is a stop word, `IT` is not).
 

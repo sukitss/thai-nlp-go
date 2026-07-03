@@ -24,26 +24,34 @@ func readLines(t testing.TB, path string) []string {
 	return lines
 }
 
-// TestThaiGolden checks the embedded Thai set matches PyThaiNLP thai_stopwords()
-// exactly (same words, same count).
+// TestThaiGolden checks the embedded Thai set matches the cleaned golden
+// (normalized + deduped PyThaiNLP thai_stopwords, 1,027 words).
 func TestThaiGolden(t *testing.T) {
 	gold := readLines(t, "testdata/stopwords_th.golden")
 	d := Default()
 	if d.Len() != len(gold) {
 		t.Fatalf("count mismatch: Default=%d golden=%d", d.Len(), len(gold))
 	}
-	for _, w := range gold {
-		if !d.IsStopword(w) {
-			t.Errorf("missing Thai stopword %q", w)
-		}
-	}
-	// and no extras
 	got := strings.Join(d.Words(), "\n")
 	want := strings.Join(gold, "\n") // golden file is already sorted
 	if got != want {
-		t.Errorf("Default() set differs from PyThaiNLP golden")
+		t.Errorf("Default() set differs from golden")
 	}
-	t.Logf("✅ Thai set matches PyThaiNLP: %d words", d.Len())
+	t.Logf("✅ Thai set = cleaned PyThaiNLP: %d words", d.Len())
+}
+
+// TestThaiSetIsClean guards the quality fixes: no BOM/zero-width chars, and no
+// decomposed tone-vowel encodings (every word is normalized).
+func TestThaiSetIsClean(t *testing.T) {
+	const decomposedAM = "ํา" // nikhahit + sara aa (should be composed U+0E33)
+	for _, w := range Default().Words() {
+		if strings.ContainsRune(w, '\uFEFF') || strings.ContainsRune(w, '\u200b') {
+			t.Errorf("stopword contains BOM/zero-width: %q", w)
+		}
+		if strings.Contains(w, decomposedAM) {
+			t.Errorf("stopword has decomposed encoding (should be normalized): %q", w)
+		}
+	}
 }
 
 func TestIsStopword(t *testing.T) {
@@ -80,8 +88,7 @@ func TestFilter(t *testing.T) {
 	}
 }
 
-// TestFilterNoAllocWhenNothingDropped: Filter returns the same slice when no
-// token is a stopword.
+// TestFilterUnchanged: Filter returns the input slice when nothing is dropped.
 func TestFilterUnchanged(t *testing.T) {
 	d := Default()
 	in := []string{"ภาษาไทย", "แมว", "หนังสือ"}
