@@ -20,6 +20,7 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`script`](script) | Split mixed-language text into runs by writing system | ✅ |
 | [`tokenize`](tokenize) | Word segmentation (PyThaiNLP **newmm** port) + char **n-gram** | ✅ |
 | [`cjk`](cjk) | Chinese word segmentation (dictionary maximal-matching) | ✅ |
+| [`jp`](jp) | Japanese word segmentation (dictionary maximal-matching) | ✅ |
 | [`en`](en) | Light English/Latin word tokenization (no dictionary) | ✅ |
 | [`normalize`](normalize) | Text normalization (PyThaiNLP-faithful) | ✅ |
 | [`stopwords`](stopwords) | Thai/English stop-word filtering | ✅ |
@@ -276,9 +277,10 @@ dictionary (the jieba word list, MIT), with single-character fallback for OOV �
 enough for BM25/keyword indexing, where segmentation accuracy has only a minor
 effect on retrieval. It reuses the flat-mmap trie, so it loads in **microseconds
 with ~no RAM** (vs ~1.5s / ~200MB for eager in-RAM Go segmenters) and is pure Go,
-no CGo, no neural model. Latin runs go to `en.Cut` (no dictionary, no load).
-(Japanese/Korean are on the roadmap; Korean text with its eojeol spaces already
-tokenizes acceptably by whitespace.)
+no CGo, no neural model. Japanese runs go to `jp.Cut` (same approach, SudachiDict
+small, Apache-2.0); Latin runs to `en.Cut` (no dictionary, no load). (Korean text
+with its eojeol spaces already tokenizes acceptably by whitespace; a dedicated
+Korean analyzer is on the roadmap.)
 
 You choose when to spend the dictionary's memory and how much. `cjk.EmbeddedSize()`
 reports the cost up front; `cjk.Default()`/`Cut` load it lazily and keep it

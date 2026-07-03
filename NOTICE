@@ -41,6 +41,14 @@ MIT License (Copyright (c) 2013 Sun Junyi). Only the word entries are used
 (compiled into a memory-mappable trie); the jieba code itself is not included.
 ================================================================================
 
+================================================================================
+Bundled Japanese dictionary: jp/data/ja.fdt is a flat-trie build of the surface
+forms from SudachiDict (small) by Works Applications
+(https://github.com/WorksApplications/SudachiDict), licensed under the Apache
+License 2.0. Only the surface-form entries are used (compiled into a
+memory-mappable trie).
+================================================================================
+
 With gratitude to the PyThaiNLP maintainers and contributors, and to the jieba
-project, for their work released openly for everyone. This library is offered
-back in the same spirit.
+and SudachiDict projects, for their work released openly for everyone. This
+library is offered back in the same spirit.

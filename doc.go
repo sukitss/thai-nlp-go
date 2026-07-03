@@ -7,6 +7,7 @@
 //	script    split mixed-language text into runs by writing system (routing)
 //	tokenize  word segmentation (newmm port) + char n-gram
 //	cjk       Chinese word segmentation (dictionary maximal-matching, mmap)
+//	jp        Japanese word segmentation (dictionary maximal-matching, mmap)
 //	en        light English/Latin word tokenization (no dictionary)
 //	normalize Unicode/Thai text normalization (PyThaiNLP-faithful)
 //	stopwords Thai/English stop-word filtering (PyThaiNLP-faithful)
