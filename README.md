@@ -23,6 +23,7 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`jp`](jp) | Japanese word segmentation (dictionary maximal-matching) | ✅ |
 | [`en`](en) | Light English/Latin word tokenization (no dictionary) | ✅ |
 | [`kr`](kr) | Light Korean tokenization (eojeol + particle stem, no dictionary) | ✅ |
+| [`multi`](multi) | One-call multilingual tokenization (detect + route th/cn/jp/kr/en) | ✅ |
 | [`normalize`](normalize) | Text normalization (PyThaiNLP-faithful) | ✅ |
 | [`stopwords`](stopwords) | Thai/English stop-word filtering | ✅ |
 | [`sentence`](sentence) | Whitespace sentence splitting (rule-based) | ✅ |
@@ -241,7 +242,27 @@ model := crf.Train(examples, 10)          // examples: tokens + I/E labels
 m := crf.Eval(model.Labels, goldExamples) // E-precision/recall/F1
 ```
 
-## Multilingual routing
+## One call for mixed-language text
+
+For a translated novel or a company document that mixes Thai, Chinese, Japanese,
+Korean and English, `multi.Segment` does the whole job — normalize, detect each
+run's language, route it to the right tokenizer, return index-ready tokens — so
+you don't wire the routing yourself:
+
+```go
+import "github.com/sukitss/thai-nlp-go/multi"
+
+multi.Segment("ผมอ่าน三国志と日本語")          // tokens across all languages, in order
+buf = multi.AppendBytes(buf[:0], text, ' ')   // zero-allocation output for indexing
+```
+
+Thai → newmm, Chinese → cjk, Japanese → jp, Korean → kr, Latin → en. CJK runs
+keep kanji+kana together and route to Japanese when kana is present, else Chinese
+(`multi.DefaultHan` sets the pure-Han default). Importing `multi` embeds all
+language dictionaries (loaded lazily per language on first use); import single
+packages if you only need some.
+
+## Multilingual routing (manual)
 
 Real corpora mix scripts (Thai + English + Chinese + Korean …). `script.SplitByScript`
 segments text into runs by writing system in one cheap pass, so you route each run

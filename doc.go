@@ -10,6 +10,7 @@
 //	jp        Japanese word segmentation (dictionary maximal-matching, mmap)
 //	en        light English/Latin word tokenization (no dictionary)
 //	kr        light Korean tokenization (eojeol + particle stem, no dictionary)
+//	multi     one-call multilingual tokenization (detect + route th/cn/jp/kr/en)
 //	normalize Unicode/Thai text normalization (PyThaiNLP-faithful)
 //	stopwords Thai/English stop-word filtering (PyThaiNLP-faithful)
 //	sentence  whitespace sentence splitting (rule-based)
