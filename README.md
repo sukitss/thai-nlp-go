@@ -174,6 +174,26 @@ translit.Similarity("อุจิวะ", "อุจิฮะ")            // 0.
 near-misses the keys drop) — the practical sound-alike test for de-duplicating
 name spellings.
 
+### Sound-alike entity index
+
+`SoundIndex` maps many spellings of an entity to one id — e.g. a character name
+transliterated differently by different translators (`เนียลี่` / `เนี่ยหลี่` /
+`เนี่ยลี่`). Build it from extracted entities, then a query in *any* spelling
+finds the entity; feed the ids into a hybrid-search keyword filter or weight.
+
+```go
+idx := translit.NewSoundIndex()
+idx.Add("nieli", "เนียลี่")     // register surface spellings for an entity
+idx.Add("nieli", "เนี่ยหลี่")
+idx.Alias("นี่หลี่", "nieli")   // interpret-variant the phonetic keys miss
+
+idx.Lookup("เนี่ยลี่") // ["nieli"] — ranked by edit-distance similarity
+```
+
+Three layers: phonetic-key bucketing + edit-distance ranking + a manual alias
+map. Build it fully once, then it's read-only and safe for concurrent `Lookup`
+across goroutines (phonetic key computation is stateless and allocation-light).
+
 For higher-accuracy sentence segmentation there is an opt-in CRF sub-package —
 a faithful port of PyThaiNLP's `crfcut`, still CPU-only and batch-friendly (no
 LLM), matching PyThaiNLP output exactly over 3,015 test cases:
