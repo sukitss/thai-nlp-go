@@ -8,21 +8,30 @@ PyThaiNLP  —  https://github.com/PyThaiNLP/pythainlp
 Copyright (C) PyThaiNLP Project
 Licensed under the Apache License, Version 2.0.
 
-The tokenization algorithm in this library is a Go port of PyThaiNLP's:
+Algorithms in this library are Go ports of PyThaiNLP's:
   - pythainlp/tokenize/newmm.py   (maximal-matching word tokenizer)
   - pythainlp/tokenize/tcc_p.py   (Thai Character Cluster segmentation)
   - pythainlp/util/trie.py        (dictionary trie)
+  - pythainlp/util/normalize.py   (text normalization)
+  - pythainlp/soundex/metasound.py (MetaSound phonetic key)
+  - pythainlp/tokenize/crfcut.py  (CRF sentence segmentation)
 
-Changes from the original: the algorithm was reimplemented in Go; the TCC
+Changes from the original: the algorithms were reimplemented in Go; the TCC
 look-ahead regexes were hand-coded as zero-allocation matchers (a regexp2-based
 oracle in the test suite verifies exact equivalence); the dictionary is stored
-as a flat, memory-mappable trie for near-instant loading.
+as a flat, memory-mappable trie for near-instant loading; the crfcut CRF
+inference (feature extraction + Viterbi) was reimplemented in pure Go over the
+exported model weights.
 ================================================================================
-Bundled dictionary: data/words_th.txt (and its compiled form words_th.fdt)
-Source: PyThaiNLP corpus (https://github.com/PyThaiNLP/pythainlp-corpus)
-Released by the PyThaiNLP project under the Creative Commons Zero 1.0 Universal
-Public Domain Dedication (CC0-1.0):
-  https://creativecommons.org/publicdomain/zero/1.0/
+Bundled dictionary & stop words: from the PyThaiNLP corpus
+(https://github.com/PyThaiNLP/pythainlp-corpus), released by the PyThaiNLP
+project under the Creative Commons Zero 1.0 Universal Public Domain Dedication
+(CC0-1.0): https://creativecommons.org/publicdomain/zero/1.0/
+================================================================================
+Bundled CRF model: sentence/crf/data/crfcut_model.tsv (weights exported from
+sentenceseg_crfcut.model, trained on TED subtitles). Created by the PyThaiNLP
+project and released under the Creative Commons Attribution 4.0 International
+License (CC-BY-4.0): https://creativecommons.org/licenses/by/4.0/
 ================================================================================
 
 With gratitude to the PyThaiNLP maintainers and contributors for their work on

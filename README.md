@@ -145,8 +145,21 @@ translit.Key("ทองดี") == translit.Key("ทองดา") // true — s
 
 `sentence` splits on whitespace (rule-based, matches PyThaiNLP non-ML engines).
 `translit.Key` is a MetaSound phonetic key (faithful port) for name-variant
-matching. Both are baselines — ML sentence segmentation and fuzzy/alias name
-matching are future improvements.
+matching.
+
+For higher-accuracy sentence segmentation there is an opt-in CRF sub-package —
+a faithful port of PyThaiNLP's `crfcut`, still CPU-only and batch-friendly (no
+LLM), matching PyThaiNLP output exactly over 3,015 test cases:
+
+```go
+import "github.com/sukitss/thai-nlp-go/sentence/crf"
+
+crf.Split("ผมชอบกินข้าว วันนี้อากาศดีมากครับ ยินดีที่ได้รู้จัก")
+// ["ผมชอบกินข้าว " "วันนี้อากาศดีมากครับ " "ยินดีที่ได้รู้จัก"]
+```
+
+It's a separate package (pulls in the tokenizer + embeds the ~2 MB CC-BY-4.0
+model), so the base `sentence` package stays dependency-light.
 
 ### CLI
 

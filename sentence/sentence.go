@@ -3,8 +3,11 @@
 // uses spaces at phrase/sentence boundaries). They are deterministic and fast.
 //
 // They match PyThaiNLP's non-ML engines: Split == sent_tokenize(engine=
-// "whitespace+newline"), SplitSpaces == engine="whitespace". For higher-quality
-// ML segmentation (PyThaiNLP's default crfcut) compose a model separately.
+// "whitespace+newline"), SplitSpaces == engine="whitespace".
+//
+// For higher-quality CRF segmentation (a faithful port of PyThaiNLP's crfcut,
+// still CPU-only and batch-friendly) use the opt-in sub-package sentence/crf,
+// which is kept separate so this package stays dependency-light.
 package sentence
 
 import (
