@@ -134,3 +134,44 @@ func FuzzAppendBytesEqualsCut(f *testing.F) {
 		}
 	})
 }
+
+// TestCutDPBeatsGreedy: on a jieba reference set, the frequency DAG+DP path
+// should reach higher recall than greedy longest-match (freq disambiguation
+// pays off) — and never lose.
+func TestCutDPBeatsGreedy(t *testing.T) {
+	txt := readLines(t, "testdata/zh_eval.txt")
+	gold := readLines(t, "testdata/zh_eval.golden")
+	rec := func(cut func(string) []string) float64 {
+		var tot, hit int
+		for i, s := range txt {
+			o := map[string]bool{}
+			for _, w := range cut(s) {
+				o[w] = true
+			}
+			for _, w := range strings.Split(gold[i], "|") {
+				if len([]rune(w)) < 2 {
+					continue
+				}
+				tot++
+				if o[w] {
+					hit++
+				}
+			}
+		}
+		return float64(hit) / float64(tot)
+	}
+	greedy, dp := rec(Cut), rec(CutDP)
+	t.Logf("recall vs jieba: Cut(greedy)=%.1f%% CutDP(freq)=%.1f%%", 100*greedy, 100*dp)
+	if dp < greedy {
+		t.Errorf("CutDP (%.3f) should not be worse than Cut (%.3f)", dp, greedy)
+	}
+}
+
+// TestCutDPValid: DP output must cover the input exactly (no lost/extra runes).
+func TestCutDPValid(t *testing.T) {
+	for _, s := range []string{"北京大学生", "我爱自然语言处理", "AT&T很酷", "机器学习和深度学习"} {
+		if strings.Join(CutDP(s), "") != strings.ReplaceAll(s, " ", "") {
+			t.Errorf("CutDP(%q)=%v does not reconstruct input", s, CutDP(s))
+		}
+	}
+}

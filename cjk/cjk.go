@@ -184,6 +184,97 @@ func (s *Segmenter) AppendBytes(dst []byte, text string, sep byte) []byte {
 	return dst
 }
 
+// CutDP segments text like Cut but resolves ambiguous Han runs with a DAG +
+// dynamic-programming maximum-probability path over dictionary word weights
+// (jieba-style, non-neural), instead of greedy longest-match. This fixes cases
+// where greedy matching makes a locally-long but globally-worse choice. It
+// requires a weighted dictionary (Default is weighted); with an unweighted dict
+// it falls back to fewest-tokens. Non-Han runs behave exactly like Cut.
+func (s *Segmenter) CutDP(text string) []string {
+	rs := []rune(text)
+	n := len(rs)
+	out := make([]string, 0, n/2+1)
+	for i := 0; i < n; {
+		r := rs[i]
+		switch {
+		case unicode.IsSpace(r):
+			i++
+		case isHan(r):
+			j := i
+			for j < n && isHan(rs[j]) {
+				j++
+			}
+			out = s.dpRun(rs, i, j, out)
+			i = j
+		default:
+			j := i + 1
+			for j < n && !isHan(rs[j]) && !unicode.IsSpace(rs[j]) && sameClass(r, rs[j]) {
+				j++
+			}
+			out = append(out, string(rs[i:j]))
+			i = j
+		}
+	}
+	return out
+}
+
+// dpRun runs the max-probability DP over rs[a:b] (a Han run) and appends the
+// best segmentation's tokens to out. Cost of an unknown single char is a large
+// negative weight so real words are always preferred.
+func (s *Segmenter) dpRun(rs []rune, a, b int, out []string) []string {
+	ft, ok := s.d.(interface {
+		PrefixWeights(text []rune, start int, outLen, outW []int32) ([]int32, []int32)
+	})
+	if !ok { // unweighted custom dict: fall back to longest-match on this run
+		return append(out, s.Cut(string(rs[a:b]))...)
+	}
+	m := b - a
+	const negInf = int64(-1) << 60
+	const unkPenalty = -100000 // single OOV char: heavily penalised vs any word
+	best := make([]int64, m+1)
+	prev := make([]int32, m+1) // token start index (relative to a) chosen at each pos
+	for k := 1; k <= m; k++ {
+		best[k] = negInf
+	}
+	var lens, ws []int32
+	for i := 0; i < m; i++ {
+		if best[i] == negInf && i != 0 {
+			continue
+		}
+		// single-char fallback edge (always available)
+		if v := best[i] + unkPenalty; v > best[i+1] {
+			best[i+1] = v
+			prev[i+1] = int32(i)
+		}
+		lens, ws = ft.PrefixWeights(rs, a+i, lens, ws)
+		for t := range lens {
+			end := i + int(lens[t])
+			if v := best[i] + int64(ws[t]); v > best[end] {
+				best[end] = v
+				prev[end] = int32(i)
+			}
+		}
+	}
+	// backtrack
+	starts := make([]int, 0, 8)
+	for k := m; k > 0; {
+		p := int(prev[k])
+		starts = append(starts, p)
+		k = p
+	}
+	for t := len(starts) - 1; t >= 0; t-- {
+		st := starts[t]
+		var en int
+		if t == 0 {
+			en = m
+		} else {
+			en = starts[t-1]
+		}
+		out = append(out, string(rs[a+st:a+en]))
+	}
+	return out
+}
+
 func isHan(r rune) bool {
 	return (r >= 0x4E00 && r <= 0x9FFF) || (r >= 0x3400 && r <= 0x4DBF) || (r >= 0xF900 && r <= 0xFAFF)
 }
@@ -198,4 +289,14 @@ func sameClass(a, b rune) bool {
 		return true
 	}
 	return false
+}
+
+// CutDP segments Chinese text with the shared dictionary using the DAG + DP
+// maximum-probability path (higher quality than greedy Cut on ambiguous runs).
+func CutDP(text string) []string {
+	s, err := load()
+	if err != nil {
+		panic("cjk: " + err.Error())
+	}
+	return s.CutDP(text)
 }

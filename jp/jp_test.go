@@ -134,3 +134,12 @@ func FuzzAppendBytesEqualsCut(f *testing.F) {
 		}
 	})
 }
+
+// TestCutDPValid: DP output must reconstruct the input (minus spaces).
+func TestCutDPValid(t *testing.T) {
+	for _, s := range []string{"機械学習", "自然言語処理", "日本語を勉強", "東京都に住む"} {
+		if strings.Join(CutDP(s), "") != strings.ReplaceAll(s, " ", "") {
+			t.Errorf("CutDP(%q)=%v does not reconstruct input", s, CutDP(s))
+		}
+	}
+}

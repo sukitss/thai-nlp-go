@@ -36,10 +36,55 @@ type FlatTrie struct {
 	endBits   []uint32
 	edgeRune  []int32
 	edgeTgt   []uint32
+	weights   []int32 // per-node word weight; nil if the dictionary is unweighted
 }
 
 func (f *FlatTrie) isEnd(node uint32) bool {
 	return f.endBits[node>>5]&(1<<(node&31)) != 0
+}
+
+// Weighted reports whether the dictionary carries per-word weights (for DAG
+// maximum-probability segmentation).
+func (f *FlatTrie) Weighted() bool { return f.weights != nil }
+
+// PrefixWeights appends, for each dictionary word that is a prefix of
+// text[start:], a (rune-length, weight) pair — the weighted form of PrefixLens,
+// for DAG/DP segmentation. outLen and outW are reset and kept in sync. If the
+// dictionary is unweighted, weights are 0.
+func (f *FlatTrie) PrefixWeights(text []rune, start int, outLen, outW []int32) ([]int32, []int32) {
+	outLen, outW = outLen[:0], outW[:0]
+	var cur uint32
+	n := len(text)
+	for i := start; i < n; i++ {
+		lo, hi := f.edgeStart[cur], f.edgeStart[cur+1]
+		r := int32(text[i])
+		found := false
+		for lo < hi {
+			mid := (lo + hi) >> 1
+			v := f.edgeRune[mid]
+			if v == r {
+				cur = f.edgeTgt[mid]
+				found = true
+				break
+			} else if v < r {
+				lo = mid + 1
+			} else {
+				hi = mid
+			}
+		}
+		if !found {
+			break
+		}
+		if f.isEnd(cur) {
+			outLen = append(outLen, int32(i+1-start))
+			if f.weights != nil {
+				outW = append(outW, f.weights[cur])
+			} else {
+				outW = append(outW, 0)
+			}
+		}
+	}
+	return outLen, outW
 }
 
 // PrefixLens appends the rune-lengths of every dictionary word that is a prefix
@@ -109,10 +154,17 @@ func BuildFlatFromTrie(t *Trie, path string) error {
 	var edgeRune []int32
 	var edgeTgt []uint32
 	endBits := make([]uint32, (numNodes+31)/32)
+	var weights []int32 // only written when the trie is weighted
+	if t.weighted {
+		weights = make([]int32, numNodes)
+	}
 	for i, nd := range order {
 		edgeStart[i] = uint32(len(edgeRune))
 		if nd.end {
 			endBits[i>>5] |= 1 << (uint(i) & 31)
+		}
+		if weights != nil {
+			weights[i] = nd.weight
 		}
 		for _, r := range sortedRunes(nd) {
 			edgeRune = append(edgeRune, int32(r))
@@ -126,12 +178,23 @@ func BuildFlatFromTrie(t *Trie, path string) error {
 		return err
 	}
 	defer f.Close()
+	// header reserved field (index 3) flags a trailing weights section, so old
+	// unweighted files (reserved=0) still load unchanged.
+	var flags uint32
+	if weights != nil {
+		flags = 1
+	}
 	bw := binary.Write
-	if err := bw(f, binary.LittleEndian, []uint32{flatMagic, uint32(numNodes), uint32(len(edgeRune)), 0}); err != nil {
+	if err := bw(f, binary.LittleEndian, []uint32{flatMagic, uint32(numNodes), uint32(len(edgeRune)), flags}); err != nil {
 		return err
 	}
 	for _, section := range []any{edgeStart, endBits, edgeRune, edgeTgt} {
 		if err := bw(f, binary.LittleEndian, section); err != nil {
+			return err
+		}
+	}
+	if weights != nil {
+		if err := bw(f, binary.LittleEndian, weights); err != nil {
 			return err
 		}
 	}
@@ -206,6 +269,7 @@ func parseFlat(data []byte) (*FlatTrie, error) {
 	}
 	numNodes := int(u32(data, 4))
 	numEdges := int(u32(data, 8))
+	flags := u32(data, 12)
 	off := 16
 	ft := &FlatTrie{}
 	ft.edgeStart = castU32(data, off, numNodes+1)
@@ -216,6 +280,10 @@ func parseFlat(data []byte) (*FlatTrie, error) {
 	ft.edgeRune = castI32(data, off, numEdges)
 	off += 4 * numEdges
 	ft.edgeTgt = castU32(data, off, numEdges)
+	off += 4 * numEdges
+	if flags&1 != 0 { // trailing weights section (one int32 per node)
+		ft.weights = castI32(data, off, numNodes)
+	}
 	return ft, nil
 }
 

@@ -199,3 +199,95 @@ func sameClass(a, b rune) bool {
 	}
 	return false
 }
+
+// CutDP segments text like Cut but resolves Japanese runs with a DAG + DP
+// maximum-probability path over dictionary word weights (MeCab-style unigram
+// cost minimization, non-neural) instead of greedy longest-match. Requires a
+// weighted dictionary (Default is weighted); falls back to fewest-tokens
+// otherwise. Non-Japanese runs behave like Cut.
+func (s *Segmenter) CutDP(text string) []string {
+	rs := []rune(text)
+	n := len(rs)
+	out := make([]string, 0, n/2+1)
+	for i := 0; i < n; {
+		r := rs[i]
+		switch {
+		case unicode.IsSpace(r):
+			i++
+		case isJapanese(r):
+			j := i
+			for j < n && isJapanese(rs[j]) {
+				j++
+			}
+			out = s.dpRun(rs, i, j, out)
+			i = j
+		default:
+			j := i + 1
+			for j < n && !isJapanese(rs[j]) && !unicode.IsSpace(rs[j]) && sameClass(r, rs[j]) {
+				j++
+			}
+			out = append(out, string(rs[i:j]))
+			i = j
+		}
+	}
+	return out
+}
+
+func (s *Segmenter) dpRun(rs []rune, a, b int, out []string) []string {
+	ft, ok := s.d.(interface {
+		PrefixWeights(text []rune, start int, outLen, outW []int32) ([]int32, []int32)
+	})
+	if !ok {
+		return append(out, s.Cut(string(rs[a:b]))...)
+	}
+	m := b - a
+	const negInf = int64(-1) << 60
+	const unkPenalty = -100000
+	best := make([]int64, m+1)
+	prev := make([]int32, m+1)
+	for k := 1; k <= m; k++ {
+		best[k] = negInf
+	}
+	var lens, ws []int32
+	for i := 0; i < m; i++ {
+		if best[i] == negInf && i != 0 {
+			continue
+		}
+		if v := best[i] + unkPenalty; v > best[i+1] {
+			best[i+1] = v
+			prev[i+1] = int32(i)
+		}
+		lens, ws = ft.PrefixWeights(rs, a+i, lens, ws)
+		for t := range lens {
+			end := i + int(lens[t])
+			if v := best[i] + int64(ws[t]); v > best[end] {
+				best[end] = v
+				prev[end] = int32(i)
+			}
+		}
+	}
+	starts := make([]int, 0, 8)
+	for k := m; k > 0; {
+		p := int(prev[k])
+		starts = append(starts, p)
+		k = p
+	}
+	for t := len(starts) - 1; t >= 0; t-- {
+		st := starts[t]
+		en := m
+		if t != 0 {
+			en = starts[t-1]
+		}
+		out = append(out, string(rs[a+st:a+en]))
+	}
+	return out
+}
+
+// CutDP segments Japanese text with the shared dictionary using DAG + DP.
+func CutDP(text string) []string {
+	s, err := load()
+	if err != nil {
+		panic("jp: " + err.Error())
+	}
+	return s.CutDP(text)
+}

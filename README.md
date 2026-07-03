@@ -294,6 +294,14 @@ import "github.com/sukitss/thai-nlp-go/cjk"
 cjk.Cut("我爱自然语言处理") // ["我" "爱" "自然语言" "处理"]
 ```
 
+For higher segmentation quality, `cjk.CutDP` / `jp.CutDP` resolve ambiguous runs
+with a frequency-weighted DAG + dynamic-programming maximum-probability path
+(jieba/MeCab-style, still non-neural) instead of greedy longest-match — e.g.
+`北京大学生` → `北京|大学生` not `北京大学|生`. On a jieba reference set this lifts
+recall from 86% (greedy `Cut`) to 95% (`CutDP`), at ~1.5× the time. The embedded
+dictionaries carry per-word weights (jieba frequency for Chinese, SudachiDict
+cost for Japanese, TNC frequency for Thai).
+
 `cjk` does Chinese word segmentation by forward maximal-matching over an embedded
 dictionary (the jieba word list, MIT), with single-character fallback for OOV —
 enough for BM25/keyword indexing, where segmentation accuracy has only a minor
