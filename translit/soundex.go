@@ -37,6 +37,23 @@ func firstRunes(s string, n int) string {
 	return string(rs)
 }
 
+func mapRune(r rune, m map[rune]rune) rune {
+	if v, ok := m[r]; ok {
+		return v
+	}
+	return r
+}
+
+// hasThaiMark reports whether text contains any Thai vowel/tone/sign (U+0E30–4C).
+func hasThaiMark(text string) bool {
+	for _, r := range text {
+		if r >= 0x0e30 && r <= 0x0e4c {
+			return true
+		}
+	}
+	return false
+}
+
 // ---------- Udom83 ----------
 
 var (
@@ -56,22 +73,36 @@ var (
 	udRE11 = regexp.MustCompile(`[\x{0e30}-\x{0e4c}]`)
 )
 
-// Udom83 returns the Udom83 Thai soundex of text (7-char code).
+// Udom83 returns the Udom83 Thai soundex of text (7-char code). Each rewrite
+// regex is guarded by a cheap Contains check so it only runs when its trigger
+// characters are present (most words trigger only a couple).
 func Udom83(text string) string {
 	if text == "" {
 		return ""
 	}
-	text = udRE1.ReplaceAllString(text, "ัน${1}")
-	text = udRE2.ReplaceAllString(text, "ั${1}")
-	text = udRE3.ReplaceAllString(text, "ัน${1}")
-	text = udRE4.ReplaceAllString(text, "ัน")
-	text = udRE5.ReplaceAllString(text, "${1}")
-	text = udRE6.ReplaceAllString(text, "${1}ย")
-	text = udRE7.ReplaceAllString(text, "ม${1}")
-	text = udRE8.ReplaceAllString(text, "ม")
-	text = udRE9.ReplaceAllString(text, "ม")
-	text = udRE10.ReplaceAllString(text, "")
-	text = udRE11.ReplaceAllString(text, "")
+	if strings.Contains(text, "รร") {
+		text = udRE1.ReplaceAllString(text, "ัน${1}")
+		text = udRE2.ReplaceAllString(text, "ั${1}")
+		text = udRE3.ReplaceAllString(text, "ัน${1}")
+		text = udRE4.ReplaceAllString(text, "ัน")
+	}
+	if strings.ContainsRune(text, 'ไ') {
+		text = udRE5.ReplaceAllString(text, "${1}")
+	}
+	if strings.ContainsAny(text, "ไใ") {
+		text = udRE6.ReplaceAllString(text, "${1}ย")
+	}
+	if strings.ContainsRune(text, 'ำ') {
+		text = udRE7.ReplaceAllString(text, "ม${1}")
+		text = udRE8.ReplaceAllString(text, "ม")
+		text = udRE9.ReplaceAllString(text, "ม")
+	}
+	if strings.ContainsRune(text, '์') {
+		text = udRE10.ReplaceAllString(text, "")
+	}
+	if hasThaiMark(text) {
+		text = udRE11.ReplaceAllString(text, "")
+	}
 	if text == "" {
 		return ""
 	}
@@ -91,68 +122,85 @@ var (
 	lkTone   = regexp.MustCompile(`[\x{0e48}-\x{0e4b}]`)
 )
 
-// LK82 returns the LK82 Thai soundex of text (5-char code).
+// sentinel rune for a "separator" (Python's "" append): kept in the code
+// sequence so it breaks de-duplication, but omitted from the final string.
+const lkSep = rune(0)
+
+// LK82 returns the LK82 Thai soundex of text (5-char code). Rune-based (no
+// per-character string allocation) with the cleanup regexes guarded.
 func LK82(text string) string {
 	if text == "" {
 		return ""
 	}
-	text = lkTone.ReplaceAllString(text, "") // remove tone marks
-	text = lkKarant.ReplaceAllString(text, "")
-	text = lkSign.ReplaceAllString(text, "")
+	if strings.ContainsAny(text, "่้๊๋") { // tone marks
+		text = lkTone.ReplaceAllString(text, "")
+	}
+	if strings.ContainsRune(text, '์') {
+		text = lkKarant.ReplaceAllString(text, "")
+	}
+	if strings.ContainsAny(text, "ฯฺๆ็ํ") { // 0e2f,0e3a,0e46,0e47,0e4d
+		text = lkSign.ReplaceAllString(text, "")
+	}
 	if text == "" {
 		return ""
 	}
 	rs := []rune(text)
-	var res []string
+	res := make([]rune, 0, len(rs)+1)
 	if rs[0] >= 'ก' && rs[0] <= 'ฮ' {
-		res = append(res, translate(string(rs[0]), lkT1))
+		res = append(res, mapRune(rs[0], lkT1))
 		rs = rs[1:]
 	} else {
 		if len(rs) > 1 {
-			res = append(res, translate(string(rs[1]), lkT1))
+			res = append(res, mapRune(rs[1], lkT1))
 		}
-		res = append(res, translate(string(rs[0]), lkT2))
+		res = append(res, mapRune(rs[0], lkT2))
 		rs = rs[2:]
 	}
 
 	iv := -2 // sentinel (Python None): never equals i-1 for i>=0
 	n := len(rs)
+	below := func(r rune) bool { return r == 'ึ' || r == 'ื' || r == 'ุ' || r == 'ู' }
 	for i, c := range rs {
 		switch {
-		case c == 'ะ' || c == 'ั' || c == 'ิ' || c == 'ี': // 0e30,0e31,0e34,0e35 — separator only
+		case c == 'ะ' || c == 'ั' || c == 'ิ' || c == 'ี': // separator only
 			iv = i
-			res = append(res, "")
-		case c == 'า' || c == 'ึ' || c == 'ื' || c == 'ู' || c == 'ๅ': // 0e32,0e36,0e37,0e39,0e45
+			res = append(res, lkSep)
+		case c == 'า' || c == 'ึ' || c == 'ื' || c == 'ู' || c == 'ๅ':
 			iv = i
-			res = append(res, translate(string(c), lkT2))
-		case c == 'ุ': // 0e38
+			res = append(res, mapRune(c, lkT2))
+		case c == 'ุ':
 			iv = i
 			if i == 0 || (rs[i-1] != 'ต' && rs[i-1] != 'ธ') {
-				res = append(res, translate(string(c), lkT2))
+				res = append(res, mapRune(c, lkT2))
 			} else {
-				res = append(res, "")
+				res = append(res, lkSep)
 			}
-		case c == 'ห' || c == 'อ': // 0e2b, 0e2d
-			if i+1 < n && (rs[i+1] == 'ึ' || rs[i+1] == 'ื' || rs[i+1] == 'ุ' || rs[i+1] == 'ู') {
-				res = append(res, translate(string(c), lkT2))
+		case c == 'ห' || c == 'อ':
+			if i+1 < n && below(rs[i+1]) {
+				res = append(res, mapRune(c, lkT2))
 			}
-		case c == 'ย' || c == 'ร' || c == 'ฤ' || c == 'ฦ' || c == 'ว': // 0e22,23,24,26,27
-			if iv == i-1 || (i+1 < n && (rs[i+1] == 'ึ' || rs[i+1] == 'ื' || rs[i+1] == 'ุ' || rs[i+1] == 'ู')) {
-				res = append(res, translate(string(c), lkT2))
+		case c == 'ย' || c == 'ร' || c == 'ฤ' || c == 'ฦ' || c == 'ว':
+			if iv == i-1 || (i+1 < n && below(rs[i+1])) {
+				res = append(res, mapRune(c, lkT2))
 			}
 		default:
-			res = append(res, translate(string(c), lkT2))
+			res = append(res, mapRune(c, lkT2))
 		}
 	}
 
 	if len(res) == 0 {
-		return firstRunes("0000", 5)
+		return "00000"
 	}
-	res2 := []string{res[0]}
+	// de-duplicate consecutive equal codes (compare each to the immediately
+	// preceding element; separators break runs), emit skipping separators, pad 5.
+	var b strings.Builder
+	if res[0] != lkSep {
+		b.WriteRune(res[0])
+	}
 	for i := 1; i < len(res); i++ {
-		if res[i] != res[i-1] {
-			res2 = append(res2, res[i])
+		if res[i] != res[i-1] && res[i] != lkSep {
+			b.WriteRune(res[i])
 		}
 	}
-	return firstRunes(strings.Join(res2, "")+"0000", 5)
+	return firstRunes(b.String()+"0000", 5)
 }
