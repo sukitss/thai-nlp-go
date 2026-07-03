@@ -194,6 +194,21 @@ Three layers: phonetic-key bucketing + edit-distance ranking + a manual alias
 map. Build it fully once, then it's read-only and safe for concurrent `Lookup`
 across goroutines (phonetic key computation is stateless and allocation-light).
 
+**Wiring into hybrid (entity-aware) search.** The keyword/sparse side of a hybrid
+retriever matches exact tokens, so a query in one spelling misses documents that
+use another. Bridge them with `SoundIndex`:
+
+```
+ingest: extract entity mentions per document; idx.Add(entityID, mention)
+        and tag the document with its entityIDs.
+query:  for a query name, ids := idx.Lookup(name)  // all spellings of that entity
+        then FILTER or up-WEIGHT documents tagged with any of those ids.
+```
+
+So a search for `เนี่ยลี่` still recalls documents that wrote `เนียลี่` or
+`เนี่ยหลี่` (or `นี่หลี่` via an alias). This complements dense retrieval, which
+tends to miss proper-noun spelling variants.
+
 For higher-accuracy sentence segmentation there is an opt-in CRF sub-package —
 a faithful port of PyThaiNLP's `crfcut`, still CPU-only and batch-friendly (no
 LLM), matching PyThaiNLP output exactly over 3,015 test cases:
