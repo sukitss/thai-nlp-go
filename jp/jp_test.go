@@ -108,3 +108,14 @@ func TestCutConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestAppendBytesMatchesCut(t *testing.T) {
+	for _, s := range []string{"機械学習", "水を飲む", "ABC 123 と"} {
+		want := strings.Join(Cut(s), " ")
+		s2, _ := Default()
+		got := string(s2.AppendBytes(nil, s, ' '))
+		if got != want {
+			t.Errorf("AppendBytes(%q)=%q want %q", s, got, want)
+		}
+	}
+}

@@ -108,3 +108,14 @@ func TestLoadOwnInstance(t *testing.T) {
 		t.Error("Load() instance differs from shared Cut")
 	}
 }
+
+func TestAppendBytesMatchesCut(t *testing.T) {
+	for _, s := range []string{"我爱自然语言处理", "AT&T很酷 深度学习", "北京大学"} {
+		want := strings.Join(Cut(s), " ")
+		s2, _ := Default()
+		got := string(s2.AppendBytes(nil, s, ' '))
+		if got != want {
+			t.Errorf("AppendBytes(%q)=%q want %q", s, got, want)
+		}
+	}
+}

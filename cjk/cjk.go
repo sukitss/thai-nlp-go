@@ -19,6 +19,7 @@ import (
 	_ "embed"
 	"sync"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/sukitss/thai-nlp-go/dict"
 )
@@ -137,6 +138,50 @@ func (s *Segmenter) Cut(text string) []string {
 		}
 	}
 	return out
+}
+
+// AppendBytes appends the segmented tokens of text (joined by sep) to dst and
+// returns the extended slice — no per-token string allocation. Reuse dst across
+// a corpus (dst[:0]) for zero steady-state allocation when building an index.
+func (s *Segmenter) AppendBytes(dst []byte, text string, sep byte) []byte {
+	rs := []rune(text)
+	n := len(rs)
+	buf := make([]int, 0, 8)
+	first := true
+	emit := func(a, b int) {
+		if !first {
+			dst = append(dst, sep)
+		}
+		first = false
+		for k := a; k < b; k++ {
+			dst = utf8.AppendRune(dst, rs[k])
+		}
+	}
+	for i := 0; i < n; {
+		r := rs[i]
+		switch {
+		case unicode.IsSpace(r):
+			i++
+		case isHan(r):
+			buf = s.d.PrefixLens(rs, i, buf)
+			best := 1
+			for _, L := range buf {
+				if L > best {
+					best = L
+				}
+			}
+			emit(i, i+best)
+			i += best
+		default:
+			j := i + 1
+			for j < n && !isHan(rs[j]) && !unicode.IsSpace(rs[j]) && sameClass(r, rs[j]) {
+				j++
+			}
+			emit(i, j)
+			i = j
+		}
+	}
+	return dst
 }
 
 func isHan(r rune) bool {
