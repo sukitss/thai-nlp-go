@@ -158,9 +158,10 @@ translit.Key("ทองดี") == translit.Key("ทองดา") // true — s
 ```
 
 `sentence` splits on whitespace (rule-based, matches PyThaiNLP non-ML engines).
-`translit` offers three Thai phonetic keys — `Key` (MetaSound), `Udom83`,
-`LK82` (all faithful ports, golden-verified) — plus `Levenshtein`/`Similarity`
-for fuzzy matching. Bucket candidates by a phonetic key, then rank with edit
+`translit` offers four Thai phonetic keys — `Key` (MetaSound), `Udom83`, `LK82`,
+and `CompleteSoundex` (Tapsai 2020; single-syllable, or pass pre-split syllables
+to `CompleteSoundexSyllables` for multi) — all faithful ports, golden-verified —
+plus `Levenshtein`/`Similarity` for fuzzy matching. Bucket candidates by a phonetic key, then rank with edit
 distance to recover variants the keys miss:
 
 ```go
