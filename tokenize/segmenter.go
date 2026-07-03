@@ -10,6 +10,7 @@ package tokenize
 // straight into a []byte index with no intermediate allocation.
 
 import (
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -17,6 +18,39 @@ import (
 )
 
 const maxGraphSize = 50
+
+// scratch holds onecut's reusable buffers, pooled so repeated calls (across a
+// corpus) allocate almost nothing at steady state. A Segmenter never stores
+// scratch, so plain Segmenters remain safe for concurrent use — each call
+// borrows its own scratch from the pool.
+type scratch struct {
+	parent  []int
+	visited []int // generation-marked; gen persists so no per-call reset is needed
+	queue   []int
+	pathBuf []int
+	lenBuf  []int
+	psbuf   []int
+	graph   map[int][]int
+	gen     int
+}
+
+var scratchPool = sync.Pool{New: func() any {
+	return &scratch{graph: make(map[int][]int)}
+}}
+
+func (sc *scratch) prepare(n int) {
+	if cap(sc.parent) < n+1 {
+		sc.parent = make([]int, n+1)
+		sc.visited = make([]int, n+1) // zeroed; gen (>0, persisted) marks visits
+	} else {
+		sc.parent = sc.parent[:n+1]
+		sc.visited = sc.visited[:n+1]
+	}
+	sc.queue = sc.queue[:0]
+	sc.pathBuf = sc.pathBuf[:0]
+	sc.lenBuf = sc.lenBuf[:0]
+	clear(sc.graph)
+}
 
 // TCCEngine reports Thai Character Cluster boundaries. TCC satisfies it.
 type TCCEngine interface {
@@ -165,18 +199,27 @@ func (s *Segmenter) AppendBytes(dst []byte, text string, sep byte) []byte {
 func (s *Segmenter) onecut(text []rune) []span {
 	n := len(text)
 	spans := make([]span, 0, n/3+1)
-	graph := make(map[int][]int)
-	graphSize := 0
 	validPoss := s.tcc.PosArray(text)
 
-	ps := &posSet{s: []int{0}}
+	// Borrow reusable buffers from the pool (returned before we exit). Buffers
+	// are onecut-local, so a plain Segmenter stays safe for concurrent use.
+	sc := scratchPool.Get().(*scratch)
+	sc.prepare(n)
+	graph := sc.graph
+	parent := sc.parent
+	visited := sc.visited
+	queue := sc.queue
+	pathBuf := sc.pathBuf
+	lenBuf := sc.lenBuf
+
+	graphSize := 0
 	endPos := 0
-	lenBuf := make([]int, 0, 16)
+	ps := &posSet{s: append(sc.psbuf[:0], 0)}
 
 	for ps.peekMin() < n {
 		beginPos := ps.popMin()
-		lens := s.d.PrefixLens(text, beginPos, lenBuf)
-		for _, L := range lens {
+		lenBuf = s.d.PrefixLens(text, beginPos, lenBuf)
+		for _, L := range lenBuf {
 			cand := beginPos + L
 			if validPoss[cand] {
 				graph[beginPos] = append(graph[beginPos], cand)
@@ -192,13 +235,46 @@ func (s *Segmenter) onecut(text []rune) []span {
 
 		switch ps.len() {
 		case 1:
-			path := bfsFirstPath(graph, endPos, ps.peekMin())
+			goal := ps.peekMin()
+			// BFS for the first (shortest) path endPos -> goal, using reusable
+			// buffers + generation-marked visited (no per-call allocation).
+			sc.gen++
+			g := sc.gen
+			queue = queue[:0]
+			queue = append(queue, endPos)
+			visited[endPos] = g
+			for qi := 0; qi < len(queue); qi++ {
+				v := queue[qi]
+				stop := false
+				for _, pos := range graph[v] {
+					if visited[pos] == g {
+						continue
+					}
+					visited[pos] = g
+					parent[pos] = v
+					if pos == goal {
+						stop = true
+						break
+					}
+					queue = append(queue, pos)
+				}
+				if stop {
+					break
+				}
+			}
 			graphSize = 0
 			clear(graph)
-			for _, pos := range path[1:] {
-				spans = append(spans, span{endPos, pos})
-				endPos = pos
+			// reconstruct goal..endPos backward, then emit spans forward
+			pathBuf = pathBuf[:0]
+			for cur := goal; cur != endPos; cur = parent[cur] {
+				pathBuf = append(pathBuf, cur)
 			}
+			prev := endPos
+			for i := len(pathBuf) - 1; i >= 0; i-- {
+				spans = append(spans, span{prev, pathBuf[i]})
+				prev = pathBuf[i]
+			}
+			endPos = prev
 		case 0:
 			if e := s.nonThai(text, beginPos); e >= 0 {
 				endPos = e
@@ -235,6 +311,12 @@ func (s *Segmenter) onecut(text []rune) []span {
 			ps.push(endPos)
 		}
 	}
+	// Return grown buffers to the pool for reuse by later calls.
+	sc.queue = queue
+	sc.pathBuf = pathBuf
+	sc.lenBuf = lenBuf
+	sc.psbuf = ps.s
+	scratchPool.Put(sc)
 	return spans
 }
 
@@ -315,35 +397,6 @@ func isThaiTwoChars(text []rune, start, end int) bool {
 		}
 	}
 	return true
-}
-
-// bfsFirstPath mirrors next(_bfs_paths_graph(...)): the first path start→goal.
-func bfsFirstPath(graph map[int][]int, start, goal int) []int {
-	visited := map[int]bool{start: true}
-	type item struct {
-		v    int
-		path []int
-	}
-	queue := []item{{start, []int{start}}}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for _, pos := range graph[cur.v] {
-			if pos == goal {
-				np := make([]int, len(cur.path)+1)
-				copy(np, cur.path)
-				np[len(cur.path)] = pos
-				return np
-			} else if !visited[pos] {
-				visited[pos] = true
-				np := make([]int, len(cur.path)+1)
-				copy(np, cur.path)
-				np[len(cur.path)] = pos
-				queue = append(queue, item{pos, np})
-			}
-		}
-	}
-	return nil
 }
 
 // ---------- small helpers ----------
