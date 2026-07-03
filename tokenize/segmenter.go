@@ -23,9 +23,14 @@ type TCCEngine interface {
 	PosArray(text []rune) []bool
 }
 
-// Segmenter tokenizes Thai text. Create one with New or NewDefault. A Segmenter
-// is safe for concurrent use as long as its dictionary is (the shared default
-// is). Session derives a cheap per-session copy with extra dictionary words.
+// Segmenter tokenizes Thai text. Create one with New or NewDefault.
+//
+// Concurrency: a plain Segmenter (from New/NewDefault) is safe for concurrent
+// use when its dictionary is read-only and stateless — the shared default
+// (dict.Default) and dict.FlatTrie/Trie are. A Segmenter from Session or
+// SessionWithDict is NOT safe for concurrent use, because its overlay keeps
+// per-lookup scratch buffers; create one per goroutine instead. The underlying
+// base dictionary and overlay *dict.Trie are read-only and may be shared freely.
 type Segmenter struct {
 	d       dict.Prefixer
 	tcc     TCCEngine
@@ -51,15 +56,33 @@ func NewDefault() (*Segmenter, error) {
 
 // Session returns a new Segmenter that shares this one's base dictionary and
 // engines but also recognizes the given extra words (e.g. custom names for one
-// session). The base is untouched, so many sessions can run concurrently over
-// the same Segmenter.
+// session). It builds a fresh overlay trie every call; if you reuse the same
+// word list across many calls, build the trie once and use SessionWithDict.
 func (s *Segmenter) Session(words []string) *Segmenter {
 	ov := dict.NewTrie()
 	for _, w := range words {
 		ov.Add(w)
 	}
+	return s.SessionWithDict(ov)
+}
+
+// SessionWithDict returns a new Segmenter that recognizes the words in overlay
+// on top of the shared base dictionary, reusing a caller-provided (and typically
+// caller-cached) *dict.Trie — the overlay is not rebuilt. This is the building
+// block for per-user "dynamic" dictionaries: the application owns the cache
+// (build a trie per user, keep it in an LRU, evict/persist as it sees fit) while
+// the lib stays stateless.
+//
+//	base, _ := dict.Default()          // shared, loaded once
+//	ov := dict.NewTrie()               // build + cache this per user
+//	for _, w := range userWords { ov.Add(w) }
+//	seg := base... tokenize.New(...).SessionWithDict(ov) // cheap; make one per goroutine
+//
+// The base dictionary and the overlay *dict.Trie are read-only and safe to share
+// across goroutines; the returned Segmenter is not (see the type doc).
+func (s *Segmenter) SessionWithDict(overlay *dict.Trie) *Segmenter {
 	return &Segmenter{
-		d:       NewOverlayDict(s.d, ov),
+		d:       NewOverlayDict(s.d, overlay),
 		tcc:     s.tcc,
 		nonThai: s.nonThai,
 	}

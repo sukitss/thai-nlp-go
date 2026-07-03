@@ -74,6 +74,30 @@ ng := tokenize.NewNGram(3)
 ng.Split("ฉันรักภาษาไทย")
 ```
 
+#### Per-user (cached) dictionaries
+
+`Session` rebuilds its overlay each call. For per-user "dynamic" dictionaries,
+build the overlay trie once and cache it in your application (the library stays
+stateless — you own the cache, eviction and persistence):
+
+```go
+base, _ := dict.Default()          // shared, loaded once for the whole process
+seg := tokenize.New(base)
+
+ov := dict.NewTrie()               // build + cache this per user (e.g. in an LRU)
+for _, w := range userWords {
+    ov.Add(w)
+}
+
+// per request / per goroutine — cheap:
+s := seg.SessionWithDict(ov)
+s.SegmentNoWS("...")
+```
+
+Concurrency: the base dictionary and the overlay `*dict.Trie` are read-only and
+safe to share across goroutines. A `Session`/`SessionWithDict` Segmenter keeps
+per-lookup scratch, so make **one per goroutine** (it's a tiny struct).
+
 ## Normalize
 
 Faithful port of PyThaiNLP `normalize()` (rule-based: strip zero-width, collapse

@@ -2,7 +2,10 @@ package tokenize
 
 import (
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/sukitss/thai-nlp-go/dict"
 )
 
 // TestSessionOverlayRecognizesWord checks that a session-specific word is kept
@@ -59,6 +62,53 @@ func TestOverlayEmptyIsBaseEquivalent(t *testing.T) {
 			t.Errorf("empty overlay differs for %q: %q vs %q", s, got, want)
 		}
 	}
+}
+
+// TestSessionWithDict checks the cached-trie path matches Session([]string).
+func TestSessionWithDict(t *testing.T) {
+	seg := defaultSeg(t)
+	words := []string{"รักภาษา", "อาริน"}
+
+	ov := dict.NewTrie()
+	for _, w := range words {
+		ov.Add(w)
+	}
+	cached := seg.SessionWithDict(ov)
+	fromWords := seg.Session(words)
+
+	for _, s := range []string{"ผมชื่อรักภาษาครับ", "อารินมาแล้ว", "ทดสอบ"} {
+		a := strings.Join(cached.SegmentNoWS(s), "|")
+		b := strings.Join(fromWords.SegmentNoWS(s), "|")
+		if a != b {
+			t.Fatalf("SessionWithDict != Session for %q: %q vs %q", s, a, b)
+		}
+	}
+}
+
+// TestSessionWithDictConcurrent shares one base dict and one cached overlay trie
+// across goroutines, each with its own Segmenter — the supported caching pattern.
+// Run with -race to catch data races.
+func TestSessionWithDictConcurrent(t *testing.T) {
+	seg := defaultSeg(t)
+	ov := dict.NewTrie()
+	ov.Add("รักภาษา")
+
+	const g = 8
+	var wg sync.WaitGroup
+	for i := 0; i < g; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s := seg.SessionWithDict(ov) // one Segmenter per goroutine; base + ov shared
+			for j := 0; j < 500; j++ {
+				if !contains(s.SegmentNoWS("ผมชื่อรักภาษาครับ"), "รักภาษา") {
+					t.Error("overlay word lost under concurrency")
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func contains(ss []string, x string) bool {
