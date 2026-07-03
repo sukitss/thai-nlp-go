@@ -119,3 +119,18 @@ func TestAppendBytesMatchesCut(t *testing.T) {
 		}
 	}
 }
+
+// FuzzAppendBytesEqualsCut guards the zero-alloc path against the []string path.
+func FuzzAppendBytesEqualsCut(f *testing.F) {
+	seg, _ := Default()
+	for _, s := range []string{"機械学習", "水を飲む", "ABC 123 と", "", "混ぜ漢字かなカナ"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		want := strings.Join(seg.Cut(s), " ")
+		got := string(seg.AppendBytes(nil, s, ' '))
+		if got != want {
+			t.Fatalf("mismatch %q: %q vs %q", s, got, want)
+		}
+	})
+}
