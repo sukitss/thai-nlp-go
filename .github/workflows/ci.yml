@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test ./...
+      - name: Generate report
+        if: always()
+        run: go run scripts/genreport.go
+      - name: Publish report to job summary
+        if: always()
+        run: cat docs/TEST-REPORT.md >> "$GITHUB_STEP_SUMMARY"

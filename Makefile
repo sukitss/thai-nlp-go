@@ -30,8 +30,11 @@ cover: ## Generate coverage.html
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "wrote coverage.html"
 
-bench: ## Run benchmarks (serial / bytes / parallel / session)
+bench: ## Run benchmarks
 	$(GO) test -run=^$$ -bench=. -benchmem $(PKG)
+
+report: ## Generate docs/TEST-REPORT.md (test + benchmark snapshot for tracking)
+	$(GO) run scripts/genreport.go
 
 fuzz: ## Run the native fuzzer for 30s
 	$(GO) test -run=^$$ -fuzz=FuzzSegment -fuzztime=30s ./tokenize/

@@ -18,13 +18,15 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | --- | --- | --- |
 | [`dict`](dict) | Shared dictionary (mmap flat trie, one shared instance) | ✅ |
 | [`tokenize`](tokenize) | Word segmentation (PyThaiNLP **newmm** port) + char **n-gram** | ✅ |
-| [`normalize`](normalize) | Unicode/Thai text normalization | 🔲 stub |
+| [`normalize`](normalize) | Text normalization (PyThaiNLP-faithful) | ✅ |
 | [`stopwords`](stopwords) | Thai/English stop-word filtering | 🔲 stub |
 | [`sentence`](sentence) | Sentence boundary detection | 🔲 stub |
 | [`translit`](translit) | Name-variant / transliteration matching | 🔲 stub |
 
-Stubs define their intended API and are being hardened one package at a time.
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and conventions.
+Remaining stubs define their intended API and are hardened one package at a time.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, and
+[docs/TEST-REPORT.md](docs/TEST-REPORT.md) for a test/benchmark snapshot
+(regenerate with `make report`).
 
 ## Design principle: performance and memory first
 
@@ -71,6 +73,23 @@ sess.SegmentNoWS("อารินพบเวธกา") // names stay whole
 ng := tokenize.NewNGram(3)
 ng.Split("ฉันรักภาษาไทย")
 ```
+
+## Normalize
+
+Faithful port of PyThaiNLP `normalize()` (rule-based: strip zero-width, collapse
+spaces, drop stray spaces before marks, reorder tone marks/vowels, drop repeats
+and dangling marks) — verified byte-for-byte against PyThaiNLP over 2,597 cases.
+A fast path returns mark-free text untouched.
+
+```go
+import "github.com/sukitss/thai-nlp-go/normalize"
+
+normalize.Normalize("เเปลก")   // "แปลก"  (double Sara E → Sara Ae)
+normalize.Normalize("นานาาา")  // "นานา"  (drop repeated vowels)
+normalize.Normalize("ก    ข")  // "ก ข"   (collapse spaces)
+```
+
+Note: it does **not** apply Unicode NFC — compose that separately if needed.
 
 ### CLI
 
