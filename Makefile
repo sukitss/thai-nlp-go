@@ -36,8 +36,10 @@ bench: ## Run benchmarks
 report: ## Generate docs/TEST-REPORT.md (test + benchmark snapshot for tracking)
 	$(GO) run scripts/genreport.go
 
-fuzz: ## Run the native fuzzer for 30s
+fuzz: ## Run the native fuzzers for 30s each
 	$(GO) test -run=^$$ -fuzz=FuzzSegment -fuzztime=30s ./tokenize/
+	$(GO) test -run=^$$ -fuzz=FuzzNormalize -fuzztime=30s ./normalize/
+	$(GO) test -run=^$$ -fuzz=FuzzMulti -fuzztime=30s ./multi/
 
 dict: ## Rebuild the embedded flat-trie from dict/data/words_th.txt
 	$(GO) run $(CMD) build -dict dict/data/words_th.txt -out dict/data/words_th.fdt

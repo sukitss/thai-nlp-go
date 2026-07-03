@@ -5,7 +5,9 @@ package translit
 // edit distance to rank/threshold — this recovers variants the keys miss.
 
 // Levenshtein returns the rune-level edit distance between a and b
-// (insertions, deletions, substitutions each cost 1).
+// (insertions, deletions, substitutions each cost 1). Cost is O(n·m) time in
+// the rune lengths of a and b — cap untrusted inputs before calling (the
+// package's fuzzy matchers use MaxSoundLen for this).
 func Levenshtein(a, b string) int {
 	ra, rb := []rune(a), []rune(b)
 	if len(ra) < len(rb) { // keep the shorter as the DP row

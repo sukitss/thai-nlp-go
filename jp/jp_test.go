@@ -74,8 +74,10 @@ func TestRecallVsSudachi(t *testing.T) {
 	// 機械|学習); for BM25 indexing the parts are still indexed, so exact parity
 	// with Sudachi's C-mode understates usefulness. We just guard a sane floor.
 	t.Logf("multi-char word recall vs Sudachi: %d/%d = %.1f%%", hit, total, 100*recall)
-	if recall < 0.6 {
-		t.Errorf("recall %.2f too low (< 0.60)", recall)
+	// Floor set just below the measured actual (66.7% on this set) so any
+	// silent regression fails; raise it if the measured recall improves.
+	if recall < 0.65 {
+		t.Errorf("recall %.2f regressed (< 0.65; measured 0.667)", recall)
 	}
 }
 

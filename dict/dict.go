@@ -49,4 +49,8 @@ func Default() (*FlatTrie, error) {
 }
 
 // EmbeddedBytes returns the raw embedded flat-trie bytes (advanced use).
+//
+// This is the live go:embed slice, NOT a copy (copying ~4 MB per call would
+// defeat the shared-dictionary design). Treat it as strictly read-only:
+// mutating it corrupts the process-wide dictionary that Default serves.
 func EmbeddedBytes() []byte { return embeddedFDT }

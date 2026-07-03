@@ -67,8 +67,10 @@ func (x *SoundIndex) Alias(surface, id string) {
 
 // Lookup returns the entity ids whose spellings sound like query, most similar
 // first (by edit-distance similarity to query). An exact alias match ranks top.
+// Queries longer than MaxSoundLen runes return no matches: this bounds the
+// O(n·m) edit-distance cost on untrusted query text.
 func (x *SoundIndex) Lookup(query string) []string {
-	if query == "" {
+	if query == "" || tooLongForSound(query) {
 		return nil
 	}
 	// best similarity per entry index among candidates

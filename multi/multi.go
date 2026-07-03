@@ -4,7 +4,7 @@
 // returns index-ready tokens — so callers don't reimplement script routing.
 //
 //	toks := multi.Segment("ผมอ่าน三国志と日本語")   // []string across all languages
-//	buf   = multi.AppendBytes(buf[:0], text, ' ')   // zero-allocation index output
+//	buf   = multi.AppendBytes(buf[:0], text, ' ')   // index output into a reused buffer
 //
 // Routing: Thai → tokenize (newmm), Chinese → cjk, Japanese → jp, Korean → kr,
 // Latin → en. CJK is grouped so kanji+kana stay together; a CJK run containing
@@ -69,8 +69,10 @@ func Segment(text string) []string {
 	return out
 }
 
-// AppendBytes is Segment writing tokens straight into dst (joined by sep) with no
-// per-token string allocation — the indexing path. Reuse dst (dst[:0]).
+// AppendBytes is Segment writing tokens straight into dst (joined by sep) — the
+// indexing path. Each run's tokenizer still allocates its tokens as []string
+// internally; what this saves over Segment is the final result slice and the
+// join copy, by writing into a reusable buffer. Reuse dst (dst[:0]).
 func AppendBytes(dst []byte, text string, sep byte) []byte {
 	text = normalize.Normalize(text)
 	if text == "" {

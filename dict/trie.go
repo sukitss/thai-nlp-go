@@ -7,6 +7,7 @@ package dict
 import (
 	"bufio"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -17,6 +18,12 @@ type trieNode struct {
 }
 
 // Trie is a rune-keyed prefix tree of dictionary words.
+//
+// Trie has no internal locking by design (lookups must stay lock- and
+// allocation-free): build it fully, then treat it as read-only — concurrent
+// readers are safe. To change a dictionary that is already shared across
+// goroutines, rebuild-and-swap: build a new Trie and atomically swap the
+// pointer; never Add to a live one.
 type Trie struct {
 	root     *trieNode
 	count    int
@@ -119,9 +126,11 @@ func LoadDict(path string) (*Trie, error) {
 	return t, sc.Err()
 }
 
-// LoadDictWeighted reads a dictionary file of "word<TAB>weight" lines (weight is
-// an integer, e.g. a scaled log-frequency) into a weighted Trie. Lines without a
-// tab are added unweighted.
+// LoadDictWeighted reads a dictionary file of "word<TAB>weight" lines (weight
+// is a base-10 int32, e.g. a scaled log-frequency) into a weighted Trie. Lines
+// without a tab are added unweighted; a line whose weight field does not parse
+// as an int32 (garbage, overflow, empty) is skipped entirely — like blank
+// lines, malformed lines never add a word or corrupt weights.
 func LoadDictWeighted(path string) (*Trie, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -134,19 +143,9 @@ func LoadDictWeighted(path string) (*Trie, error) {
 	for sc.Scan() {
 		line := sc.Text()
 		if tab := strings.IndexByte(line, '\t'); tab >= 0 {
-			w := int64(0)
-			for _, c := range line[tab+1:] {
-				if c < '0' || c > '9' {
-					if c == '-' {
-						continue
-					}
-					break
-				}
-				w = w*10 + int64(c-'0')
-			}
-			neg := len(line) > tab+1 && line[tab+1] == '-'
-			if neg {
-				w = -w
+			w, err := strconv.ParseInt(strings.TrimSpace(line[tab+1:]), 10, 32)
+			if err != nil {
+				continue
 			}
 			t.AddWeighted(line[:tab], int32(w))
 		} else {

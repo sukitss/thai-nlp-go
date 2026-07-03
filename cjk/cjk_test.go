@@ -72,8 +72,10 @@ func TestRecallVsJieba(t *testing.T) {
 	}
 	recall := float64(hit) / float64(total)
 	t.Logf("multi-char word recall vs jieba: %d/%d = %.1f%%", hit, total, 100*recall)
-	if recall < 0.75 {
-		t.Errorf("recall %.2f too low (< 0.75)", recall)
+	// Floor set just below the measured actual (85.7% on this set) so any
+	// silent regression fails; raise it if the measured recall improves.
+	if recall < 0.85 {
+		t.Errorf("recall %.2f regressed (< 0.85; measured 0.857)", recall)
 	}
 }
 
@@ -164,6 +166,14 @@ func TestCutDPBeatsGreedy(t *testing.T) {
 	t.Logf("recall vs jieba: Cut(greedy)=%.1f%% CutDP(freq)=%.1f%%", 100*greedy, 100*dp)
 	if dp < greedy {
 		t.Errorf("CutDP (%.3f) should not be worse than Cut (%.3f)", dp, greedy)
+	}
+	// Floors just below the measured actuals (greedy 86.0%, DP 94.7% on this
+	// 18-sentence set) so silent regressions fail; raise them if recall improves.
+	if greedy < 0.85 {
+		t.Errorf("greedy recall %.3f regressed (< 0.85; measured 0.860)", greedy)
+	}
+	if dp < 0.94 {
+		t.Errorf("DP recall %.3f regressed (< 0.94; measured 0.947)", dp)
 	}
 }
 

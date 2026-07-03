@@ -136,9 +136,12 @@ for the Thai block; x/text is used only as a test oracle).
 
 ## Stopwords
 
-Thai stop-word set faithful to PyThaiNLP `thai_stopwords()` (1,027 words), plus a
-common English set. Matching is case-sensitive, so latin acronyms stay distinct
-(`it` is a stop word, `IT` is not).
+Thai stop-word set derived from PyThaiNLP `thai_stopwords()` (its 1,030 raw
+entries, cleaned to 1,027 canonical words: two duplicates that differed only by
+tone/vowel encoding merged, one stray BOM-prefixed duplicate dropped — an
+intentional, documented deviation), plus a common English set. Matching is
+case-sensitive, so latin acronyms stay distinct (`it` is a stop word, `IT` is
+not).
 
 ```go
 import "github.com/sukitss/thai-nlp-go/stopwords"
@@ -179,8 +182,11 @@ translit.Key("ทองดี") == translit.Key("ทองดา") // true — s
 `sentence` splits on whitespace (rule-based, matches PyThaiNLP non-ML engines).
 `translit` offers four Thai phonetic keys — `Key` (MetaSound), `Udom83`, `LK82`,
 and `CompleteSoundex` (Tapsai 2020; single-syllable, or pass pre-split syllables
-to `CompleteSoundexSyllables` for multi) — all faithful ports, golden-verified —
-plus `Levenshtein`/`Similarity` for fuzzy matching. Bucket candidates by a phonetic key, then rank with edit
+to `CompleteSoundexSyllables` for multi) — all faithful ports, golden-verified
+(for `CompleteSoundex` the golden covers 235 single-syllable words plus 15
+multi-syllable cases with pre-split syllables; automatic multi-syllable
+splitting is not golden-verified) — plus `Levenshtein`/`Similarity` for fuzzy
+matching. Bucket candidates by a phonetic key, then rank with edit
 distance to recover variants the keys miss:
 
 ```go
@@ -248,7 +254,9 @@ retrainable on your own labelled data (`crf.Train` / `crf.Eval` / `Model.Save`,
 plus the `cmd/crftrain` tool that reads CoNLL-U). Validated on Universal
 Dependencies Thai (CC BY-SA): training in-domain on UD_Thai-TUD lifts held-out
 sentence-boundary **E-F1 to 0.99, vs 0.78 for the embedded TED model and 0.47
-for whitespace splitting** — in-domain training is the biggest quality lever.
+for whitespace splitting** — in-domain training is the biggest quality lever
+(one-off measurement via `cmd/crftrain` on UD_Thai-TUD; not reproduced in CI —
+the training data is CC BY-SA and not bundled).
 
 ```go
 model := crf.Train(examples, 10)          // examples: tokens + I/E labels
@@ -266,7 +274,7 @@ you don't wire the routing yourself:
 import "github.com/sukitss/thai-nlp-go/multi"
 
 multi.Segment("ผมอ่าน三国志と日本語")          // tokens across all languages, in order
-buf = multi.AppendBytes(buf[:0], text, ' ')   // zero-allocation output for indexing
+buf = multi.AppendBytes(buf[:0], text, ' ')   // output into a reused buffer for indexing
 ```
 
 Thai → newmm, Chinese → cjk, Japanese → jp, Korean → kr, Latin → en. CJK runs
@@ -310,16 +318,19 @@ cjk.Cut("我爱自然语言处理") // ["我" "爱" "自然语言" "处理"]
 For higher segmentation quality, `cjk.CutDP` / `jp.CutDP` resolve ambiguous runs
 with a frequency-weighted DAG + dynamic-programming maximum-probability path
 (jieba/MeCab-style, still non-neural) instead of greedy longest-match — e.g.
-`北京大学生` → `北京|大学生` not `北京大学|生`. On a jieba reference set this lifts
-recall from 86% (greedy `Cut`) to 95% (`CutDP`), at ~1.5× the time. The embedded
+`北京大学生` → `北京|大学生` not `北京大学|生`. On a small bundled jieba-reference
+set (18 sentences, asserted in CI) this lifts recall from 86% (greedy `Cut`) to
+95% (`CutDP`), at ~1.5× the time. The embedded
 dictionaries carry per-word weights (jieba frequency for Chinese, SudachiDict
 cost for Japanese, TNC frequency for Thai).
 
 `cjk` does Chinese word segmentation by forward maximal-matching over an embedded
 dictionary (the jieba word list, MIT), with single-character fallback for OOV —
 enough for BM25/keyword indexing, where segmentation accuracy has only a minor
-effect on retrieval. It reuses the flat-mmap trie, so it loads in **microseconds
-with ~no RAM** (vs ~1.5s / ~200MB for eager in-RAM Go segmenters) and is pure Go,
+effect on retrieval. It reuses the flat-mmap trie, so it loads in **under a millisecond
+with ~no RAM** (including a full structural validation pass over the trie image) (vs ~1.5s / ~200MB for eager in-RAM Go segmenters — measured once
+against gse on our dev machine; our load-time benchmark is checked in, the
+comparison is not run in CI) and is pure Go,
 no CGo, no neural model. Japanese runs go to `jp.Cut` (same approach, SudachiDict
 small, Apache-2.0); Latin runs to `en.Cut` (no dictionary, no load); Korean runs
 to `kr.Cut` (eojeol split plus multi-syllable particle stemming — dictionary-free;
@@ -353,7 +364,11 @@ thainlp build -dict dict/data/words_th.txt -out my.fdt  # (re)build a flat trie
 | Parallel | ~53 MB/s | scales across cores (dict is shared) |
 | Session | ~12 MB/s | overlay overhead negligible |
 
-Dictionary load is a one-time ~microsecond mmap, shared process-wide.
+Dictionary load is a one-time ~1 ms parse+validate of the embedded image (mmap-backed files load in ~0.2 ms), shared process-wide.
+
+Throughput numbers here (and in [docs/TEST-REPORT.md](docs/TEST-REPORT.md)) are
+`make report` snapshots from the dev machine — tracked for regressions between
+snapshots, not asserted in CI.
 
 ## Development
 

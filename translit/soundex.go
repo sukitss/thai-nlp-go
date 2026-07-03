@@ -154,7 +154,7 @@ func LK82(text string) string {
 			res = append(res, mapRune(rs[1], lkT1))
 		}
 		res = append(res, mapRune(rs[0], lkT2))
-		rs = rs[2:]
+		rs = rs[min(2, len(rs)):] // clamp like Python's word[2:] (never past end)
 	}
 
 	iv := -2 // sentinel (Python None): never equals i-1 for i>=0

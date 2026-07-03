@@ -9,9 +9,11 @@ package dict
 // output is identical to the pointer Trie.
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"unsafe"
 
@@ -26,7 +28,13 @@ import (
 //	edgeRune  [numEdges] int32      (edge rune, sorted per node)
 //	edgeTgt   [numEdges] uint32     (target node)
 //	node 0 = root
-const flatMagic uint32 = 0x4E4D4654 // "NMFT"
+const (
+	flatMagic     uint32 = 0x4E4D4654 // "NMFT"
+	flatHeaderLen        = 16
+	flatWordBytes        = 4 // every section is an array of 4-byte words
+
+	flagWeighted uint32 = 1 // header reserved field: trailing weights section
+)
 
 // FlatTrie is a read-only, memory-mapped dictionary. Safe for concurrent reads.
 type FlatTrie struct {
@@ -163,12 +171,20 @@ func (f *FlatTrie) PrefixLens(text []rune, start int, out []int) []int {
 	return out
 }
 
-// Close releases the mmap region, if any. Safe to call on non-mmap tries.
+// Close releases the trie's backing memory (unmapping the mmap region, if any)
+// and invalidates it: lookups after Close panic recoverably (nil-slice index)
+// instead of touching unmapped memory and killing the process with SIGSEGV.
+// Close is idempotent. The caller must ensure no goroutine can still be using
+// the trie when Close runs — to replace a live dictionary, build the new trie,
+// atomically swap the pointer, and Close the old one only after all readers
+// are done (refcounting/quiescing is the caller's job).
 func (f *FlatTrie) Close() error {
-	if f.data != nil {
-		err := f.data.Unmap()
-		f.data = nil
-		return err
+	f.edgeStart, f.endBits, f.edgeRune, f.edgeTgt, f.weights = nil, nil, nil, nil, nil
+	f.keep = nil
+	data := f.data
+	f.data = nil
+	if data != nil {
+		return data.Unmap()
 	}
 	return nil
 }
@@ -215,32 +231,53 @@ func BuildFlatFromTrie(t *Trie, path string) error {
 	}
 	edgeStart[numNodes] = uint32(len(edgeRune))
 
-	f, err := os.Create(path)
+	// Write to a temp file in the same directory, then rename over the target:
+	// atomic on the same filesystem, and flush/close errors are never dropped,
+	// so a failed build cannot leave a truncated .fdt behind.
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	tmp := f.Name()
+	if err := writeFlat(f, numNodes, edgeStart, endBits, edgeRune, edgeTgt, weights); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func writeFlat(f *os.File, numNodes int, edgeStart, endBits []uint32, edgeRune []int32, edgeTgt []uint32, weights []int32) error {
 	// header reserved field (index 3) flags a trailing weights section, so old
 	// unweighted files (reserved=0) still load unchanged.
 	var flags uint32
 	if weights != nil {
-		flags = 1
+		flags = flagWeighted
 	}
+	w := bufio.NewWriter(f)
 	bw := binary.Write
-	if err := bw(f, binary.LittleEndian, []uint32{flatMagic, uint32(numNodes), uint32(len(edgeRune)), flags}); err != nil {
+	if err := bw(w, binary.LittleEndian, []uint32{flatMagic, uint32(numNodes), uint32(len(edgeRune)), flags}); err != nil {
 		return err
 	}
 	for _, section := range []any{edgeStart, endBits, edgeRune, edgeTgt} {
-		if err := bw(f, binary.LittleEndian, section); err != nil {
+		if err := bw(w, binary.LittleEndian, section); err != nil {
 			return err
 		}
 	}
 	if weights != nil {
-		if err := bw(f, binary.LittleEndian, weights); err != nil {
+		if err := bw(w, binary.LittleEndian, weights); err != nil {
 			return err
 		}
 	}
-	return nil
+	return w.Flush()
 }
 
 func sortedRunes(nd *trieNode) []rune {
@@ -255,7 +292,8 @@ func sortedRunes(nd *trieNode) []rune {
 // ---------- load ----------
 
 // OpenFlat memory-maps a flat trie file. Fastest load; the returned FlatTrie
-// holds the mmap open until Close is called.
+// holds the mmap open until Close is called. See Close for the lifetime
+// contract: never Close while any goroutine may still be doing lookups.
 func OpenFlat(path string) (*FlatTrie, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -305,26 +343,60 @@ func FromBytes(data []byte) (*FlatTrie, error) {
 }
 
 // parseFlat maps the CSR sections onto data (must be 4-byte aligned) zero-copy.
+// The header counts drive unsafe casts, so it first checks that len(data) is
+// exactly what the header implies, then validates the CSR invariants (edgeStart
+// monotone and closed over numEdges, every edgeTgt in range) in one O(nodes+
+// edges) pass — a corrupt or truncated file returns an error at load time
+// instead of panicking (or reading out of bounds) at first lookup. Lookup
+// paths stay validation-free.
 func parseFlat(data []byte) (*FlatTrie, error) {
-	if len(data) < 16 || u32(data, 0) != flatMagic {
+	if len(data) < flatHeaderLen || u32(data, 0) != flatMagic {
 		return nil, fmt.Errorf("newmm: bad flat trie file (magic mismatch)")
 	}
 	numNodes := int(u32(data, 4))
 	numEdges := int(u32(data, 8))
 	flags := u32(data, 12)
-	off := 16
+	if numNodes < 1 {
+		return nil, fmt.Errorf("newmm: bad flat trie file (no root node)")
+	}
+	n64, e64 := int64(numNodes), int64(numEdges)
+	nbits := (numNodes + 31) / 32
+	words := (n64 + 1) + int64(nbits) + 2*e64
+	if flags&flagWeighted != 0 {
+		words += n64
+	}
+	if want := flatHeaderLen + flatWordBytes*words; int64(len(data)) != want {
+		return nil, fmt.Errorf("newmm: bad flat trie file (%d bytes, header implies %d)", len(data), want)
+	}
+	off := flatHeaderLen
 	ft := &FlatTrie{}
 	ft.edgeStart = castU32(data, off, numNodes+1)
-	off += 4 * (numNodes + 1)
-	nbits := (numNodes + 31) / 32
+	off += flatWordBytes * (numNodes + 1)
 	ft.endBits = castU32(data, off, nbits)
-	off += 4 * nbits
+	off += flatWordBytes * nbits
 	ft.edgeRune = castI32(data, off, numEdges)
-	off += 4 * numEdges
+	off += flatWordBytes * numEdges
 	ft.edgeTgt = castU32(data, off, numEdges)
-	off += 4 * numEdges
-	if flags&1 != 0 { // trailing weights section (one int32 per node)
+	off += flatWordBytes * numEdges
+	if flags&flagWeighted != 0 { // trailing weights section (one int32 per node)
 		ft.weights = castI32(data, off, numNodes)
+	}
+	es := ft.edgeStart
+	if es[0] != 0 || es[numNodes] != uint32(numEdges) {
+		return nil, fmt.Errorf("newmm: bad flat trie file (edgeStart bounds %d..%d, want 0..%d)", es[0], es[numNodes], numEdges)
+	}
+	prev := uint32(0)
+	for i, v := range es[1:] {
+		if v < prev {
+			return nil, fmt.Errorf("newmm: bad flat trie file (edgeStart not monotone at node %d)", i+1)
+		}
+		prev = v
+	}
+	limit := uint32(numNodes)
+	for i, tgt := range ft.edgeTgt {
+		if tgt >= limit {
+			return nil, fmt.Errorf("newmm: bad flat trie file (edge %d targets node %d of %d)", i, tgt, numNodes)
+		}
 	}
 	return ft, nil
 }
