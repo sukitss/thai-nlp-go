@@ -6,7 +6,7 @@
 //	dict      shared dictionary layer (mmap flat trie, one shared instance)
 //	tokenize  word segmentation (newmm port) + char n-gram
 //	normalize Unicode/Thai text normalization (PyThaiNLP-faithful)
-//	stopwords Thai stop-word filtering                (planned)
+//	stopwords Thai/English stop-word filtering (PyThaiNLP-faithful)
 //	sentence  Thai sentence boundary detection        (planned)
 //	translit  transliteration / name-variant matching (planned)
 //

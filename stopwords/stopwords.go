@@ -1,21 +1,129 @@
-// Package stopwords will provide Thai (and mixed Thai/English) stop-word
-// filtering for lexical stages — e.g. BM25/keyword weighting and keyword
+// Package stopwords provides Thai (and common English) stop-word sets and
+// filtering for lexical stages such as BM25/keyword weighting and keyword
 // extraction, where very common words are noise rather than signal.
 //
-// STATUS: planned. Intended: an embedded default set (Thai from PyThaiNLP +
-// common English), overridable via config, and acronym-aware so latin acronyms
-// like "IT" are not treated the same as the word "it". Load the set once and
-// share it (see the shared-resource pattern in package dict).
+// The Thai set is faithful to PyThaiNLP's thai_stopwords() (1,030 words). The
+// English set is a compact list of common function words (override it if you
+// need a specific one). Sets are read-only after construction and safe for
+// concurrent reads; the shared Default/English instances are loaded once.
+//
+// Matching is exact and case-sensitive, which keeps latin acronyms distinct
+// from stop words: "it" is a stop word, "IT" is not. Lower-case your ordinary
+// tokens (but not acronyms) before checking if you want case-insensitive
+// behavior for words.
 package stopwords
 
-// Set is a stop-word set.
-//
-// TODO: implement (embed list + IsStopword + filter helpers). This stub treats
-// nothing as a stop word.
-type Set struct{}
+import (
+	"bufio"
+	_ "embed"
+	"sort"
+	"strings"
+	"sync"
+)
 
-// Default returns the default Thai+English stop-word set.
-func Default() *Set { return &Set{} }
+//go:embed data/stopwords_th.txt
+var thaiData string
 
-// IsStopword reports whether w is a stop word.
-func (s *Set) IsStopword(w string) bool { return false }
+//go:embed data/stopwords_en.txt
+var englishData string
+
+// Set is an immutable-by-convention collection of stop words. Reads are safe for
+// concurrent use; build custom sets with New or Union rather than mutating one.
+type Set struct {
+	m map[string]struct{}
+}
+
+// New builds a Set from the given words (blank entries are ignored).
+func New(words ...string) *Set {
+	s := &Set{m: make(map[string]struct{}, len(words))}
+	for _, w := range words {
+		if w = strings.TrimSpace(w); w != "" {
+			s.m[w] = struct{}{}
+		}
+	}
+	return s
+}
+
+// Union returns a new Set containing every word from all the given sets.
+func Union(sets ...*Set) *Set {
+	out := &Set{m: map[string]struct{}{}}
+	for _, s := range sets {
+		if s == nil {
+			continue
+		}
+		for w := range s.m {
+			out.m[w] = struct{}{}
+		}
+	}
+	return out
+}
+
+var (
+	thaiOnce, enOnce sync.Once
+	thaiSet, enSet   *Set
+)
+
+// Default returns the shared Thai stop-word set (PyThaiNLP thai_stopwords).
+// Treat it as read-only; use Union or New to derive custom sets.
+func Default() *Set {
+	thaiOnce.Do(func() { thaiSet = parse(thaiData) })
+	return thaiSet
+}
+
+// English returns the shared common-English stop-word set.
+func English() *Set {
+	enOnce.Do(func() { enSet = parse(englishData) })
+	return enSet
+}
+
+func parse(data string) *Set {
+	s := &Set{m: map[string]struct{}{}}
+	sc := bufio.NewScanner(strings.NewReader(data))
+	for sc.Scan() {
+		if w := strings.TrimSpace(sc.Text()); w != "" {
+			s.m[w] = struct{}{}
+		}
+	}
+	return s
+}
+
+// IsStopword reports whether w is in the set (exact, case-sensitive).
+func (s *Set) IsStopword(w string) bool {
+	_, ok := s.m[w]
+	return ok
+}
+
+// Filter returns tokens with stop words removed. It allocates a new slice only
+// if something is dropped; otherwise it returns tokens unchanged.
+func (s *Set) Filter(tokens []string) []string {
+	drop := false
+	for _, t := range tokens {
+		if s.IsStopword(t) {
+			drop = true
+			break
+		}
+	}
+	if !drop {
+		return tokens
+	}
+	out := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		if !s.IsStopword(t) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// Len reports the number of words in the set.
+func (s *Set) Len() int { return len(s.m) }
+
+// Words returns the set's words, sorted (for inspection/testing).
+func (s *Set) Words() []string {
+	out := make([]string, 0, len(s.m))
+	for w := range s.m {
+		out = append(out, w)
+	}
+	sort.Strings(out)
+	return out
+}

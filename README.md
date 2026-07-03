@@ -19,7 +19,7 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`dict`](dict) | Shared dictionary (mmap flat trie, one shared instance) | ✅ |
 | [`tokenize`](tokenize) | Word segmentation (PyThaiNLP **newmm** port) + char **n-gram** | ✅ |
 | [`normalize`](normalize) | Text normalization (PyThaiNLP-faithful) | ✅ |
-| [`stopwords`](stopwords) | Thai/English stop-word filtering | 🔲 stub |
+| [`stopwords`](stopwords) | Thai/English stop-word filtering | ✅ |
 | [`sentence`](sentence) | Sentence boundary detection | 🔲 stub |
 | [`translit`](translit) | Name-variant / transliteration matching | 🔲 stub |
 
@@ -114,6 +114,22 @@ normalize.Normalize("ก    ข")  // "ก ข"   (collapse spaces)
 ```
 
 Note: it does **not** apply Unicode NFC — compose that separately if needed.
+
+## Stopwords
+
+Thai stop-word set faithful to PyThaiNLP `thai_stopwords()` (1,030 words), plus a
+common English set. Matching is case-sensitive, so latin acronyms stay distinct
+(`it` is a stop word, `IT` is not).
+
+```go
+import "github.com/sukitss/thai-nlp-go/stopwords"
+
+sw := stopwords.Union(stopwords.Default(), stopwords.English())
+sw.IsStopword("และ")                        // true
+sw.Filter([]string{"ผม","และ","รัก","the"}) // ["ผม" "รัก"]
+
+custom := stopwords.Union(stopwords.Default(), stopwords.New("อาริน", "เวธกา"))
+```
 
 ### CLI
 
