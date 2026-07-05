@@ -320,3 +320,22 @@ func CutDP(text string) []string {
 func (s *Segmenter) Subwords(word string) []string {
 	return dict.Subwords(s.d, word, 16)
 }
+
+// Session returns a Segmenter that also recognizes the given words on top of
+// the shared base dictionary — a per-tenant glossary (character names, product
+// codes). The base is shared read-only; only the small overlay is per-session.
+// Not safe for concurrent use (the overlay keeps scratch buffers); give each
+// goroutine its own Session.
+func (s *Segmenter) Session(words []string) *Segmenter {
+	ov := dict.NewTrie()
+	for _, w := range words {
+		ov.Add(w)
+	}
+	return s.SessionWithDict(ov)
+}
+
+// SessionWithDict returns a Segmenter layering a prebuilt overlay trie over the
+// base dictionary (reuse the trie across calls instead of rebuilding).
+func (s *Segmenter) SessionWithDict(overlay *dict.Trie) *Segmenter {
+	return &Segmenter{d: dict.NewOverlayDict(s.d, overlay)}
+}

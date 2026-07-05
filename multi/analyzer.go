@@ -45,9 +45,12 @@ const (
 // global state consulted is the documented DefaultHan fallback when Han is
 // left at its zero value.
 type Analyzer struct {
-	// Overlay is a per-tenant dictionary overlay (e.g. a translator glossary)
-	// recognized on Thai runs on top of the shared base dictionary; nil means
-	// base only. The *dict.Trie is read-only here and may be shared freely.
+	// Overlay is a per-tenant dictionary overlay (e.g. a translator glossary or
+	// character-name list) recognized on Thai AND Han (Chinese/Japanese) runs on
+	// top of the shared base dictionary; nil means base only. The *dict.Trie is
+	// read-only here and may be shared freely (one trie can hold names in any
+	// script). A per-call session wraps the shared base, so the base is never
+	// copied.
 	Overlay *dict.Trie
 
 	// Stop drops matching terms from Terms/AppendTerms output; nil keeps all.
@@ -228,6 +231,39 @@ func (a *Analyzer) hanJapanese() bool {
 	return DefaultHan == "jp"
 }
 
+// cjkCut/jpCut tokenize a Han run, honoring Overlay (a per-tenant glossary,
+// e.g. character names) and UseDP. With no overlay they use the shared package
+// segmenter; with one they wrap it in a per-call session (small OverlayDict
+// over the shared base — the base is never copied). The session is used only
+// within this call, so it stays single-threaded and safe.
+func (a *Analyzer) cjkCut(run string) []string {
+	if a.Overlay != nil {
+		s := cjk_().SessionWithDict(a.Overlay)
+		if a.UseDP {
+			return s.CutDP(run)
+		}
+		return s.Cut(run)
+	}
+	if a.UseDP {
+		return cjk.CutDP(run)
+	}
+	return cjk.Cut(run)
+}
+
+func (a *Analyzer) jpCut(run string) []string {
+	if a.Overlay != nil {
+		s := jp_().SessionWithDict(a.Overlay)
+		if a.UseDP {
+			return s.CutDP(run)
+		}
+		return s.Cut(run)
+	}
+	if a.UseDP {
+		return jp.CutDP(run)
+	}
+	return jp.Cut(run)
+}
+
 // cutRun tokenizes one script run with this Analyzer's configuration — the
 // same routing as tokenizeRun, minus the DefaultHan global when Han is set.
 func (a *Analyzer) cutRun(th *tokenize.Segmenter, l lang, run string, hasKana bool) []string {
@@ -237,15 +273,9 @@ func (a *Analyzer) cutRun(th *tokenize.Segmenter, l lang, run string, hasKana bo
 		coarse = th.SegmentNoWS(run)
 	case cjkHan:
 		if hasKana || a.hanJapanese() {
-			if a.UseDP {
-				coarse = jp.CutDP(run)
-			} else {
-				coarse = jp.Cut(run)
-			}
-		} else if a.UseDP {
-			coarse = cjk.CutDP(run)
+			coarse = a.jpCut(run)
 		} else {
-			coarse = cjk.Cut(run)
+			coarse = a.cjkCut(run)
 		}
 	case hangul:
 		coarse = kr.Cut(run)

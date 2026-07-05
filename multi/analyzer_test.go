@@ -558,3 +558,20 @@ func TestAnalyzerSubwordsCJK(t *testing.T) {
 		t.Errorf("expected coarse or subword for 北京大学: %v", got)
 	}
 }
+
+func TestAnalyzerOverlayCJK(t *testing.T) {
+	// A made-up character name that the base dict would split. Without overlay
+	// it splits; with overlay it stays whole.
+	name := "聂力" // Nie Li — likely split into 聂 / 力 by base
+	base := Analyzer{}
+	ov := dict.NewTrie()
+	ov.Add(name)
+	withOv := Analyzer{Overlay: ov}
+
+	got := withOv.Terms(name)
+	joined := " " + strings.Join(got, " ") + " "
+	if !strings.Contains(joined, " "+name+" ") {
+		t.Errorf("overlay CJK name not kept whole: base=%v overlay=%v", base.Terms(name), got)
+	}
+	t.Logf("聂力: base=%v overlay=%v", base.Terms(name), got)
+}

@@ -20,8 +20,8 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`script`](script) | Split mixed-language text into runs by writing system | ✅ |
 | [`token`](token) | Shared token-with-byte-offsets value used by all tokenizers | ✅ |
 | [`tokenize`](tokenize) | Word segmentation (PyThaiNLP **newmm** port) + char **n-gram** | ✅ |
-| [`cjk`](cjk) | Chinese word segmentation (dictionary maximal-matching) | ✅ |
-| [`jp`](jp) | Japanese word segmentation (dictionary maximal-matching) | ✅ |
+| [`cjk`](cjk) | Chinese word segmentation (dictionary maximal-matching) + per-tenant `Session` overlay | ✅ |
+| [`jp`](jp) | Japanese word segmentation (dictionary maximal-matching) + per-tenant `Session` overlay | ✅ |
 | [`en`](en) | Light English/Latin word tokenization (no dictionary) | ✅ |
 | [`kr`](kr) | Light Korean tokenization (eojeol + particle stem, no dictionary) | ✅ |
 | [`multi`](multi) | One-call multilingual tokenization (detect + route th/cn/jp/kr/en); Analyzer options: stop words, width fold, coarse/fine `Subwords` | ✅ |
