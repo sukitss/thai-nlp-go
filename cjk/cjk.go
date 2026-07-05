@@ -320,3 +320,9 @@ func CutDP(text string) []string {
 	}
 	return s.CutDP(text)
 }
+
+// Subwords returns dictionary words strictly inside word (fine field for
+// coarse/fine keyword indexing): "北京大学" → "北京","大学". See dict.Subwords.
+func (s *Segmenter) Subwords(word string) []string {
+	return dict.Subwords(s.d, word, 16)
+}

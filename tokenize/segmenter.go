@@ -483,3 +483,13 @@ func (p *posSet) push(v int) {
 	copy(p.s[i+1:], p.s[i:])
 	p.s[i] = v
 }
+
+// MaxSubwords caps the fine subwords emitted per token (recall vs index size).
+const MaxSubwords = 16
+
+// Subwords returns the dictionary words strictly inside word (the fine field of
+// a coarse/fine keyword index). See dict.Subwords. Empty when word has no
+// smaller in-dictionary pieces.
+func (s *Segmenter) Subwords(word string) []string {
+	return dict.Subwords(s.d, word, MaxSubwords)
+}

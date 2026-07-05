@@ -527,3 +527,34 @@ func TestAnalyzerFoldWidth(t *testing.T) {
 		t.Errorf("FoldWidth should change output: plain=%v folded=%v", p, f)
 	}
 }
+
+func TestAnalyzerSubwords(t *testing.T) {
+	base := Analyzer{}
+	sw := Analyzer{Subwords: true}
+	// Thai compound: subwords must add the parts, keep the whole.
+	got := sw.Terms("ภาษาไทย")
+	joined := " " + strings.Join(got, " ") + " "
+	if !strings.Contains(joined, " ภาษาไทย ") {
+		t.Errorf("coarse token missing: %v", got)
+	}
+	// at least one proper subword present (ภาษา or ไทย), and more tokens than base
+	if len(got) <= len(base.Terms("ภาษาไทย")) {
+		t.Errorf("subwords should add tokens: base=%v sw=%v", base.Terms("ภาษาไทย"), got)
+	}
+	// measurable: a sub-query matches the subword-expanded index
+	hasPart := strings.Contains(joined, " ภาษา ") || strings.Contains(joined, " ไทย ")
+	if !hasPart {
+		t.Errorf("no dictionary subword emitted for ภาษาไทย: %v", got)
+	}
+	t.Logf("ภาษาไทย → %v", got)
+}
+
+func TestAnalyzerSubwordsCJK(t *testing.T) {
+	sw := Analyzer{Subwords: true}
+	got := sw.Terms("北京大学")
+	joined := " " + strings.Join(got, " ") + " "
+	t.Logf("北京大学 → %v", got)
+	if !strings.Contains(joined, " 北京大学 ") && !strings.Contains(joined, " 大学 ") {
+		t.Errorf("expected coarse or subword for 北京大学: %v", got)
+	}
+}

@@ -84,6 +84,14 @@ type Analyzer struct {
 	// multilingual index should turn it on (ingest AND query, symmetrically).
 	// It does not fold simplified↔traditional Chinese or hiragana↔katakana.
 	FoldWidth bool
+
+	// Subwords emits each token's dictionary subwords alongside it (the fine
+	// field of a coarse/fine keyword index), so a query for a compound's part
+	// hits: index "ภาษาไทย" also matches "ภาษา"/"ไทย", "北京大学" also matches
+	// "北京"/"大学". For the INDEX side only — leave off at query time (the full
+	// query token already matches the indexed subword). Dictionary-backed
+	// scripts only (Thai, Han); Latin/Hangul pass through. Off by default.
+	Subwords bool
 }
 
 // Terms runs the full pipeline and returns the filtered terms for indexing or
@@ -223,25 +231,56 @@ func (a *Analyzer) hanJapanese() bool {
 // cutRun tokenizes one script run with this Analyzer's configuration — the
 // same routing as tokenizeRun, minus the DefaultHan global when Han is set.
 func (a *Analyzer) cutRun(th *tokenize.Segmenter, l lang, run string, hasKana bool) []string {
+	var coarse []string
 	switch l {
 	case thai:
-		return th.SegmentNoWS(run)
+		coarse = th.SegmentNoWS(run)
 	case cjkHan:
 		if hasKana || a.hanJapanese() {
 			if a.UseDP {
-				return jp.CutDP(run)
+				coarse = jp.CutDP(run)
+			} else {
+				coarse = jp.Cut(run)
 			}
-			return jp.Cut(run)
+		} else if a.UseDP {
+			coarse = cjk.CutDP(run)
+		} else {
+			coarse = cjk.Cut(run)
 		}
-		if a.UseDP {
-			return cjk.CutDP(run)
-		}
-		return cjk.Cut(run)
 	case hangul:
-		return kr.Cut(run)
+		coarse = kr.Cut(run)
 	default:
-		return en.Cut(run) // digits/symbols/other letters: whitespace-ish split
+		coarse = en.Cut(run) // digits/symbols/other letters: whitespace-ish split
 	}
+	if !a.Subwords {
+		return coarse
+	}
+	return a.withSubwords(th, l, coarse, hasKana)
+}
+
+// withSubwords appends each token's dictionary subwords after it (coarse+fine
+// index expansion). Only dictionary-backed scripts (Thai, Han) produce
+// subwords; Latin/Hangul pass through unchanged.
+func (a *Analyzer) withSubwords(th *tokenize.Segmenter, l lang, coarse []string, hasKana bool) []string {
+	sub := func(tok string) []string {
+		switch l {
+		case thai:
+			return th.Subwords(tok)
+		case cjkHan:
+			if hasKana || a.hanJapanese() {
+				return jp_().Subwords(tok)
+			}
+			return cjk_().Subwords(tok)
+		default:
+			return nil
+		}
+	}
+	out := make([]string, 0, len(coarse))
+	for _, t := range coarse {
+		out = append(out, t)
+		out = append(out, sub(t)...)
+	}
+	return out
 }
 
 // filterTerm applies the Terms/AppendTerms post-filters to one token and

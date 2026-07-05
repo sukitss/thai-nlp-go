@@ -31,13 +31,29 @@ import (
 )
 
 var (
-	thOnce sync.Once
-	thSeg  *tokenize.Segmenter
+	thOnce  sync.Once
+	thSeg   *tokenize.Segmenter
+	cjkOnce sync.Once
+	cjkSeg  *cjk.Segmenter
+	jpOnce  sync.Once
+	jpSeg   *jp.Segmenter
 )
 
 func thai_() *tokenize.Segmenter {
 	thOnce.Do(func() { thSeg, _ = tokenize.NewDefault() })
 	return thSeg
+}
+
+// cjk_/jp_ cache the shared dictionary segmenters — used for Subwords (the
+// package-level cjk.Cut/jp.Cut have no subword form, they need an instance).
+func cjk_() *cjk.Segmenter {
+	cjkOnce.Do(func() { cjkSeg, _ = cjk.Default() })
+	return cjkSeg
+}
+
+func jp_() *jp.Segmenter {
+	jpOnce.Do(func() { jpSeg, _ = jp.Default() })
+	return jpSeg
 }
 
 // lang classes for routing.
