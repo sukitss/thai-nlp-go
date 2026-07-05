@@ -32,6 +32,15 @@ var thaiData string
 //go:embed data/stopwords_en.txt
 var englishData string
 
+//go:embed data/stopwords_zh.txt
+var chineseData string
+
+//go:embed data/stopwords_ja.txt
+var japaneseData string
+
+//go:embed data/stopwords_ko.txt
+var koreanData string
+
 // Set is an immutable-by-convention collection of stop words. Reads are safe for
 // concurrent use; build custom sets with New or Union rather than mutating one.
 type Set struct {
@@ -64,8 +73,12 @@ func Union(sets ...*Set) *Set {
 }
 
 var (
-	thaiOnce, enOnce sync.Once
-	thaiSet, enSet   *Set
+	thaiOnce, enOnce       sync.Once
+	thaiSet, enSet         *Set
+	zhOnce, jaOnce, koOnce sync.Once
+	zhSet, jaSet, koSet    *Set
+	allOnce                sync.Once
+	allSet                 *Set
 )
 
 // Default returns the shared Thai stop-word set (PyThaiNLP thai_stopwords).
@@ -81,13 +94,43 @@ func English() *Set {
 	return enSet
 }
 
+// Chinese/Japanese/Korean return shared curated function-word sets (particles,
+// pronouns, auxiliaries — the recall-safe keyword-search noise, not content
+// words). Treat as read-only; derive with Union/New.
+func Chinese() *Set {
+	zhOnce.Do(func() { zhSet = parse(chineseData) })
+	return zhSet
+}
+
+func Japanese() *Set {
+	jaOnce.Do(func() { jaSet = parse(japaneseData) })
+	return jaSet
+}
+
+func Korean() *Set {
+	koOnce.Do(func() { koSet = parse(koreanData) })
+	return koSet
+}
+
+// Multilingual returns the union of all built-in sets (th/en/zh/ja/ko) — the
+// one-call stop set for a mixed-language index. Since function words rarely
+// collide across scripts, one shared set is safe for the multi analyzer.
+func Multilingual() *Set {
+	allOnce.Do(func() {
+		allSet = Union(Default(), English(), Chinese(), Japanese(), Korean())
+	})
+	return allSet
+}
+
 func parse(data string) *Set {
 	s := &Set{m: map[string]struct{}{}}
 	sc := bufio.NewScanner(strings.NewReader(data))
 	for sc.Scan() {
-		if w := strings.TrimSpace(sc.Text()); w != "" {
-			s.m[w] = struct{}{}
+		w := strings.TrimSpace(sc.Text())
+		if w == "" || strings.HasPrefix(w, "#") {
+			continue // blank or comment line
 		}
+		s.m[w] = struct{}{}
 	}
 	return s
 }

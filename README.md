@@ -26,7 +26,7 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`kr`](kr) | Light Korean tokenization (eojeol + particle stem, no dictionary) | ✅ |
 | [`multi`](multi) | One-call multilingual tokenization (detect + route th/cn/jp/kr/en); Analyzer options: stop words, width fold, coarse/fine `Subwords` | ✅ |
 | [`normalize`](normalize) | Text normalization: Thai (PyThaiNLP-faithful) + multilingual `FoldForIndex` (full/half-width + NFC for CJK/Latin/Korean) | ✅ |
-| [`stopwords`](stopwords) | Thai/English stop-word filtering | ✅ |
+| [`stopwords`](stopwords) | Stop-word filtering: Thai/English + curated CJK/JP/KR function words + `Multilingual()` | ✅ |
 | [`vocab`](vocab) | Term → sequential-id vocabulary + DF/IDF (sparse/BM25 indexing) | ✅ |
 | [`sentence`](sentence) | Whitespace sentence splitting (rule-based) | ✅ |
 | [`chunk`](chunk) | Offset-true hierarchical chunking (RAG ingestion) | ✅ |

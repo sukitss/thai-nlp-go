@@ -203,3 +203,41 @@ func TestBuilderTerms(t *testing.T) {
 		return true
 	})
 }
+
+func TestCJKKStopwords(t *testing.T) {
+	cases := []struct {
+		name string
+		set  *Set
+		stop []string // must be stopwords
+		keep []string // must NOT be stopwords (content)
+	}{
+		{"zh", Chinese(), []string{"的", "了", "是", "我"}, []string{"北京", "大学"}},
+		{"ja", Japanese(), []string{"は", "が", "を", "です"}, []string{"日本語", "東京"}},
+		{"ko", Korean(), []string{"은", "는", "이", "하다"}, []string{"한국어", "서울"}},
+	}
+	for _, c := range cases {
+		for _, w := range c.stop {
+			if !c.set.IsStopword(w) {
+				t.Errorf("%s: %q should be a stopword", c.name, w)
+			}
+		}
+		for _, w := range c.keep {
+			if c.set.IsStopword(w) {
+				t.Errorf("%s: content word %q must NOT be a stopword", c.name, w)
+			}
+		}
+	}
+	// header comment must not leak in as a token
+	if Chinese().IsStopword("#") || Chinese().IsStopword("# curated function words") {
+		t.Error("comment line leaked into set")
+	}
+}
+
+func TestMultilingualUnion(t *testing.T) {
+	m := Multilingual()
+	for _, w := range []string{"และ" /*th*/, "the" /*en*/, "的" /*zh*/, "は" /*ja*/, "은" /*ko*/} {
+		if !m.IsStopword(w) {
+			t.Errorf("Multilingual missing %q", w)
+		}
+	}
+}
