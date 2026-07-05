@@ -509,3 +509,21 @@ func BenchmarkAnalyzerTokens(b *testing.B) {
 	}
 	_ = n
 }
+
+func TestAnalyzerFoldWidth(t *testing.T) {
+	plain := Analyzer{}
+	folded := Analyzer{FoldWidth: true}
+	// full-width query must match half-width indexed form only when FoldWidth on
+	if got := folded.Terms("ＡＰＩ"); len(got) != 1 || got[0] != "api" && got[0] != "API" {
+		// note: LowerLatin off → expect "API"
+		if len(got) == 0 || got[0] != "API" {
+			t.Errorf("FoldWidth Terms(ＡＰＩ) = %v, want [API]", got)
+		}
+	}
+	// without fold, full-width stays full-width (distinct from ASCII)
+	p := plain.Terms("ＡＰＩ")
+	f := folded.Terms("ＡＰＩ")
+	if len(p) > 0 && len(f) > 0 && p[0] == f[0] {
+		t.Errorf("FoldWidth should change output: plain=%v folded=%v", p, f)
+	}
+}

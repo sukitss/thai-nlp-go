@@ -77,6 +77,13 @@ type Analyzer struct {
 	// FoldThaiDigits applies normalize.DigitsToArabic after Normalize, so
 	// "๕" indexes as "5". Off by default (Normalize alone never folds digits).
 	FoldThaiDigits bool
+
+	// FoldWidth applies normalize.FoldForIndex (full/half-width folding + NFC)
+	// so CJK/Latin variants unify: full-width "ＡＰＩ" matches "API", half-width
+	// "ｶﾀｶﾅ" matches "カタカナ", NFD Korean matches NFC. Off by default; a
+	// multilingual index should turn it on (ingest AND query, symmetrically).
+	// It does not fold simplified↔traditional Chinese or hiragana↔katakana.
+	FoldWidth bool
 }
 
 // Terms runs the full pipeline and returns the filtered terms for indexing or
@@ -182,6 +189,9 @@ func (a *Analyzer) normalized(text string) string {
 	text = normalize.Normalize(text)
 	if a.FoldThaiDigits {
 		text = normalize.DigitsToArabic(text)
+	}
+	if a.FoldWidth {
+		text = normalize.FoldForIndex(text)
 	}
 	return text
 }
