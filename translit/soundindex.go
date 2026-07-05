@@ -32,6 +32,18 @@ func NewSoundIndex() *SoundIndex {
 
 // keyed prefixes keep the three algorithms' keyspaces disjoint.
 func bucketKeys(name string) []string {
+	out := phoneticBucketKeys(name)
+	// Cross-lingual: a romanized (pinyin) name also buckets under the phonetic
+	// keys of its Thai transliteration, so "Nie Li" meets "เนี่ยหลี่".
+	if isASCIILetters(name) {
+		if th := PinyinToThai(name); th != "" {
+			out = append(out, phoneticBucketKeys(th)...)
+		}
+	}
+	return out
+}
+
+func phoneticBucketKeys(name string) []string {
 	ks := PhoneticKeys(name) // [metasound, udom83, lk82]
 	out := make([]string, 0, 3)
 	for i, k := range ks {
@@ -96,7 +108,7 @@ func (x *SoundIndex) Lookup(query string) []string {
 	}
 	for _, k := range bucketKeys(query) {
 		for _, e := range x.buckets[k] {
-			s := Similarity(query, x.entries[e].name)
+			s := crossSim(query, x.entries[e].name)
 			if s > best[e] {
 				best[e] = s
 			}
@@ -147,7 +159,7 @@ func (x *SoundIndex) LookupScored(query string, minSim float64) []Match {
 	}
 	for _, k := range bucketKeys(query) {
 		for _, e := range x.buckets[k] {
-			s := Similarity(query, x.entries[e].name)
+			s := crossSim(query, x.entries[e].name)
 			if s > best[e] {
 				best[e] = s
 			}

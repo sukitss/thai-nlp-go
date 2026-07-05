@@ -30,7 +30,7 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`vocab`](vocab) | Term → sequential-id vocabulary + DF/IDF (sparse/BM25 indexing) | ✅ |
 | [`sentence`](sentence) | Whitespace sentence splitting (rule-based) | ✅ |
 | [`chunk`](chunk) | Offset-true hierarchical chunking (RAG ingestion) | ✅ |
-| [`translit`](translit) | Name-variant matching (MetaSound phonetic key) | ✅ |
+| [`translit`](translit) | Name-variant matching (MetaSound/Udom83/LK82 + edit distance); cross-lingual pinyin→Thai bridge (聂力/Nie Li/เนี่ยหลี่ in one bucket) | ✅ |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, and
 [docs/TEST-REPORT.md](docs/TEST-REPORT.md) for a test/benchmark snapshot

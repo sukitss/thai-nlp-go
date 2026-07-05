@@ -243,3 +243,37 @@ func TestSoundIndexConcurrentLookupScored(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCrossLingualPinyinMatch(t *testing.T) {
+	x := NewSoundIndex()
+	x.Add("c1", "เนี่ยหลี่") // Thai transliteration indexed
+	x.Add("c2", "เย่ฟาน")
+
+	// A pinyin query must find the Thai-indexed character.
+	for _, q := range []string{"Nie Li", "nie li"} {
+		if ms := x.Lookup(q); !contains(ms, "c1") {
+			t.Errorf("pinyin %q → %v, want c1 (เนี่ยหลี่)", q, ms)
+		}
+	}
+	if ms := x.Lookup("Ye Fan"); !contains(ms, "c2") {
+		t.Errorf("pinyin Ye Fan → %v, want c2 (เย่ฟาน)", ms)
+	}
+}
+
+func TestPinyinToThaiBasics(t *testing.T) {
+	cases := map[string]string{"Nie Li": "เนียลี", "Ye Fan": "เยอฟาน"}
+	for p, want := range cases {
+		if got := PinyinToThai(p); got != want {
+			t.Errorf("PinyinToThai(%q) = %q, want %q", p, got, want)
+		}
+	}
+}
