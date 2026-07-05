@@ -28,7 +28,7 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`normalize`](normalize) | Text normalization: Thai (PyThaiNLP-faithful) + multilingual `FoldForIndex` (full/half-width + NFC for CJK/Latin/Korean) | ✅ |
 | [`stopwords`](stopwords) | Stop-word filtering: Thai/English + curated CJK/JP/KR function words + `Multilingual()` | ✅ |
 | [`vocab`](vocab) | Term → sequential-id vocabulary + DF/IDF (sparse/BM25 indexing) | ✅ |
-| [`sentence`](sentence) | Whitespace sentence splitting (rule-based) | ✅ |
+| [`sentence`](sentence) | Sentence splitting — selectable engines: `Whitespace` (fastest), `Heuristic` (ender/starter words, no model, ~14× faster than CRF), and `crf` (crfcut, most accurate) | ✅ |
 | [`chunk`](chunk) | Offset-true hierarchical chunking (RAG ingestion) | ✅ |
 | [`translit`](translit) | Name-variant matching (MetaSound/Udom83/LK82 + edit distance); cross-lingual pinyin→Thai bridge (聂力/Nie Li/เนี่ยหลี่ in one bucket) | ✅ |
 

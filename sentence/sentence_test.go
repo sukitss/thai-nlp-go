@@ -60,3 +60,51 @@ func TestEmpty(t *testing.T) {
 		t.Errorf("SplitSpaces(\"\") = %v, want nil", got)
 	}
 }
+
+func TestSplitHeuristic(t *testing.T) {
+	// space inside a sentence must NOT split when no ender/starter signals it
+	// (กิน/ข้าว/ร้าน are not in the ender/starter lists).
+	got := SplitHeuristic("ผมกิน ข้าว ร้านนี้")
+	if len(got) != 1 {
+		t.Errorf("mid-sentence space over-split: %v", got)
+	}
+	// ender ครับ → boundary
+	g2 := SplitHeuristic("สวัสดีครับ วันนี้อากาศดี")
+	if len(g2) != 2 || g2[0] != "สวัสดีครับ" {
+		t.Errorf("ender split failed: %v", g2)
+	}
+	// starter แต่ → boundary
+	g3 := SplitHeuristic("เขาจะมา แต่รถติด")
+	if len(g3) != 2 || g3[1] != "แต่รถติด" {
+		t.Errorf("starter split failed: %v", g3)
+	}
+	// newline = hard boundary regardless of words
+	g4 := SplitHeuristic("บรรทัดหนึ่ง\nบรรทัดสอง")
+	if len(g4) != 2 {
+		t.Errorf("newline hard-break failed: %v", g4)
+	}
+	// punctuation
+	g5 := SplitHeuristic("จริงหรือ? ไม่น่าเชื่อ")
+	if len(g5) != 2 {
+		t.Errorf("punctuation split failed: %v", g5)
+	}
+}
+
+func TestEngineInterface(t *testing.T) {
+	var e Engine = Heuristic
+	if len(e.Split("สวัสดีครับ ไปกันเถอะ")) != 2 {
+		t.Error("Heuristic engine via interface failed")
+	}
+	e = Whitespace
+	if len(e.Split("a b c")) != 3 {
+		t.Error("Whitespace engine via interface failed")
+	}
+}
+
+func BenchmarkSplitHeuristic(b *testing.B) {
+	txt := "วันนี้อากาศดีมากครับ ผมเลยออกไปวิ่ง ตอนเย็นฝนตก"
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		SplitHeuristic(txt)
+	}
+}
