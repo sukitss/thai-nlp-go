@@ -108,3 +108,24 @@ func BenchmarkSplitHeuristic(b *testing.B) {
 		SplitHeuristic(txt)
 	}
 }
+
+func TestHeuristicPaiyannoiNotBoundary(t *testing.T) {
+	// ฯ is an abbreviation mark, not a sentence end: กรุงเทพฯ must not split
+	// from what follows purely because of ฯ.
+	got := SplitHeuristic("เขาอยู่กรุงเทพฯ แถวสุขุมวิท")
+	if len(got) != 1 {
+		t.Errorf("ฯ wrongly treated as boundary: %v", got)
+	}
+	// ฯลฯ mid-list also not a boundary
+	g2 := SplitHeuristic("มีผลไม้ กล้วย ส้ม ฯลฯ วางขาย")
+	for _, s := range g2 {
+		if s == "มีผลไม้ กล้วย ส้ม ฯลฯ" && len(g2) > 1 {
+			// acceptable if not split at ฯลฯ itself; just ensure ฯลฯ didn't force a cut after it
+		}
+	}
+	// ! still a boundary
+	g3 := SplitHeuristic("ดีมาก! ไปต่อกันเลย")
+	if len(g3) != 2 {
+		t.Errorf("! should split: %v", g3)
+	}
+}

@@ -127,12 +127,14 @@ func startsWithStarter(s string) bool {
 	return false
 }
 
-// endsWithSentPunct reports a sentence-final punctuation mark: ! ? ฯ or an
-// ellipsis (… or "...").
+// endsWithSentPunct reports a sentence-final punctuation mark: ! ? … "..." or
+// the archaic Thai terminators ๚ ๛. NOT ฯ (paiyannoi) — that is an abbreviation
+// mark (กรุงเทพฯ) and ฯลฯ means "etc." mid-list, so it never ends a sentence.
 func endsWithSentPunct(s string) bool {
 	s = strings.TrimRight(s, " \t")
 	return strings.HasSuffix(s, "!") || strings.HasSuffix(s, "?") ||
-		strings.HasSuffix(s, "ฯ") || strings.HasSuffix(s, "…") || strings.HasSuffix(s, "...")
+		strings.HasSuffix(s, "…") || strings.HasSuffix(s, "...") ||
+		strings.HasSuffix(s, "๚") || strings.HasSuffix(s, "๛")
 }
 
 // Engine is a selectable sentence splitter, so a pipeline can trade speed for
