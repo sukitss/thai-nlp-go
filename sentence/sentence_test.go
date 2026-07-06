@@ -129,3 +129,25 @@ func TestHeuristicPaiyannoiNotBoundary(t *testing.T) {
 		t.Errorf("! should split: %v", g3)
 	}
 }
+
+func TestRulecutFeatures(t *testing.T) {
+	cases := []struct {
+		desc string
+		in   string
+		want int
+	}{
+		{"bracket non-break", "เขาพูดว่า (ดี มาก) แล้วเดินไป", 1},
+		{"honorific name", "นาย สมชาย ใจดี มาก", 1},
+		{"date non-break", "เกิดวันที่ 1 มกราคม 2540 ที่เชียงใหม่", 1},
+		{"maiyamok ender", "เขาเดินช้าๆ ผมรีบไป", 2},
+		{"paiyannoi keep", "อยู่กรุงเทพฯ แถวสุขุมวิท", 1},
+		{"ender ครับ", "สวัสดีครับ ยินดีต้อนรับ", 2},
+		{"starter แต่", "เขาจะมา แต่รถติด", 2},
+		{"mid space keep", "ผมกิน ข้าว ร้านนี้", 1},
+	}
+	for _, c := range cases {
+		if got := SplitHeuristic(c.in); len(got) != c.want {
+			t.Errorf("%s: want %d, got %d: %v", c.desc, c.want, len(got), got)
+		}
+	}
+}
