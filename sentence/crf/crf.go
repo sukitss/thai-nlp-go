@@ -49,7 +49,62 @@ type weights struct{ i, e float64 }
 // transition weights. Safe for concurrent reads.
 type Model struct {
 	feats              map[string]weights
+	featsH             map[uint64]weights // FNV-1a(key) → weights (hot-path lookup)
+	seeds              map[int]uint64     // precomputed FNV state after the constant "<prefix><ng>_<d0>_<d0+ng>=" part
+	hashOK             bool               // no FNV collisions among keys → hash path is safe
 	tII, tIE, tEI, tEE float64
+}
+
+const (
+	fnvOffset = 1469598103934665603
+	fnvPrime  = 1099511628211
+)
+
+func fnvByte(h uint64, b byte) uint64 { h ^= uint64(b); return h * fnvPrime }
+
+func fnvStr(h uint64, s string) uint64 {
+	for i := 0; i < len(s); i++ {
+		h = fnvByte(h, s[i])
+	}
+	return h
+}
+
+// seedKey packs (prefixIndex, nGram, distance) into one int for the seeds map.
+func seedKey(pfx, ng, d0 int) int { return pfx<<12 | ng<<6 | (d0 + 16) }
+
+var featPrefixes = []string{"word_", "ender_", "starter_"}
+
+// buildHashIndex precomputes the hashed feature map and the per-(prefix,ng,d0)
+// FNV seeds, so stateScores hashes only the variable token bytes — no key string
+// is built per lookup. hashOK is false if any two keys collide (then the string
+// path is used, guaranteeing correctness).
+func (m *Model) buildHashIndex() {
+	m.featsH = make(map[uint64]weights, len(m.feats))
+	m.hashOK = true
+	for k, w := range m.feats {
+		h := fnvStr(fnvOffset, k)
+		if _, dup := m.featsH[h]; dup {
+			m.hashOK = false
+			m.featsH = nil
+			return
+		}
+		m.featsH[h] = w
+	}
+	m.seeds = make(map[int]uint64, len(featPrefixes)*3*(2*window+2))
+	for pi, pf := range featPrefixes {
+		for ng := 1; ng <= 3; ng++ {
+			for d0 := -window; d0 <= window+1; d0++ {
+				s := fnvStr(fnvOffset, pf)
+				s = fnvStr(s, strconv.Itoa(ng))
+				s = fnvByte(s, '_')
+				s = fnvStr(s, strconv.Itoa(d0))
+				s = fnvByte(s, '_')
+				s = fnvStr(s, strconv.Itoa(d0+ng))
+				s = fnvByte(s, '=')
+				m.seeds[seedKey(pi, ng, d0)] = s
+			}
+		}
+	}
 }
 
 var (
@@ -81,6 +136,7 @@ func load() {
 			feats[line[:a]] = weights{wi, we}
 		}
 		defaultModel = &Model{feats: feats, tII: tII, tIE: tIE, tEI: tEI, tEE: tEE}
+		defaultModel.buildHashIndex()
 		enders = parseSet(endersData)
 		starters = parseSet(startersData)
 		seg, _ = tokenize.NewDefault()
@@ -180,6 +236,37 @@ func (m *Model) stateScores(toks []string) [][2]float64 {
 	}
 
 	out := make([][2]float64, len(toks))
+
+	if m.hashOK {
+		// hot path: hash only the variable token bytes onto a precomputed seed;
+		// no per-lookup key string is built.
+		add := func(si, se *float64, pi, ng, d0 int, parts []string) {
+			h := m.seeds[seedKey(pi, ng, d0)]
+			for k, p := range parts {
+				if k > 0 {
+					h = fnvByte(h, '|')
+				}
+				h = fnvStr(h, p)
+			}
+			w := m.featsH[h]
+			*si += w.i
+			*se += w.e
+		}
+		for i := window; i < len(pad)-window; i++ {
+			si, se := m.feats["bias"].i, m.feats["bias"].e
+			for ng := 1; ng <= 3; ng++ {
+				for j := i - window; j < i+window+2-ng; j++ {
+					add(&si, &se, 0, ng, j-i, pad[j:j+ng])
+					add(&si, &se, 1, ng, j-i, ender[j:j+ng])
+					add(&si, &se, 2, ng, j-i, starter[j:j+ng])
+				}
+			}
+			out[i-window] = [2]float64{si, se}
+		}
+		return out
+	}
+
+	// fallback (hash collision detected): build the key string and look it up.
 	buf := make([]byte, 0, 64)
 	add := func(si, se *float64, prefix string, ng, d0 int, parts []string) {
 		buf = buf[:0]
@@ -200,7 +287,6 @@ func (m *Model) stateScores(toks []string) [][2]float64 {
 		*si += w.i
 		*se += w.e
 	}
-
 	for i := window; i < len(pad)-window; i++ {
 		si, se := m.feats["bias"].i, m.feats["bias"].e
 		for ng := 1; ng <= 3; ng++ {
