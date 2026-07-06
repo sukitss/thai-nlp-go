@@ -1,0 +1,335 @@
+// Package charseg is an "outside-the-box" fast Thai sentence segmenter: a
+// CHARACTER-LEVEL, single-pass, NO-TOKENIZER boundary classifier.
+//
+// Motivation. The CRF segmenter (sentence/crf) spends ~33% of its time on
+// tokenization and ~67% on hand-crafted word-n-gram feature extraction; the
+// 2-state Viterbi itself is trivial. So the cost is TOKENIZE + FEATURE
+// ENGINEERING, not "ML". This package removes both stages: it classifies
+// boundaries directly from raw characters in one pass, with no word tokenizer.
+//
+// Design. Thai sentence boundaries in practice fall at a small set of
+// CANDIDATE positions — before whitespace, after terminal punctuation, or
+// before an opening dialogue quote — each detectable in O(1) from the
+// characters alone (no tokenizer). At every candidate the classifier scores
+// character n-grams (1..3) in a ±3-rune window plus cheap character-type
+// features (space / digit / Thai / Latin / punct / quote / script-change) and
+// predicts boundary-after (binary). Features are hashed into a fixed weight
+// vector (the "hashing trick"), so inference does array indexing only — no map
+// lookups, no per-position allocation. Weights are fit with an averaged
+// perceptron (dependency-free; same family as crf.Train).
+//
+// This mirrors the sentence.Heuristic candidate set (whitespace/punct) but
+// replaces its hand-written ender/starter word lists with a learned
+// character-n-gram model — closing the accuracy gap to the CRF while keeping
+// near-heuristic speed and needing no tokenizer.
+package charseg
+
+import (
+	"bufio"
+	"io"
+	"strconv"
+	"strings"
+)
+
+// Model is a hashed averaged-perceptron boundary classifier. After loading it
+// is read-only and safe for concurrent use.
+type Model struct {
+	w    []float32 // hashed weight vector; len is a power of two
+	mask uint64
+}
+
+const fnvOff = 1469598103934665603
+const fnvPrime = 1099511628211
+
+func hstart(kind uint64) uint64 { h := uint64(fnvOff); h ^= kind; h *= fnvPrime; return h }
+func hstep(h, v uint64) uint64  { h ^= v; h *= fnvPrime; return h }
+
+// pad is a rune sentinel for out-of-range window positions (distinct from any
+// real rune, which is <= 0x10FFFF).
+const pad uint64 = 1 << 32
+
+func rn(r []rune, idx int) uint64 {
+	if idx < 0 || idx >= len(r) {
+		return pad
+	}
+	return uint64(r[idx])
+}
+
+// character type classes (used as features and for script-change detection).
+const (
+	tOther uint64 = iota
+	tSpace
+	tDigit
+	tThai
+	tLatin
+	tPunct
+	tQuote
+	tPad
+)
+
+func runeType(v uint64) uint64 {
+	if v == pad {
+		return tPad
+	}
+	r := rune(v)
+	switch {
+	case r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f' || r == 0x00A0:
+		return tSpace
+	case (r >= '0' && r <= '9') || (r >= '๐' && r <= '๙'):
+		return tDigit
+	case r >= 0x0E00 && r <= 0x0E7F:
+		return tThai
+	case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= 0x00C0 && r <= 0x024F):
+		return tLatin
+	}
+	switch r {
+	case '“', '”', '"', '‘', '’', '\'', '«', '»', '「', '」', '『', '』', '„', '〈', '〉':
+		return tQuote
+	case '.', ',', '!', '?', ';', ':', '…', '。', '！', '？', '、', '·', '(', ')', '[', ']', '{', '}', '-':
+		return tPunct
+	}
+	return tOther
+}
+
+const maxFeat = 40
+
+// features writes the (unmasked) hashed feature ids for a boundary decision
+// after rune i into out and returns the count. Character n-grams (1..3) over a
+// ±3-rune window plus character-type features. Allocation-free (fixed array).
+func features(r []rune, i int, out *[maxFeat]uint64) int {
+	c0 := rn(r, i-3)
+	c1 := rn(r, i-2)
+	c2 := rn(r, i-1)
+	c3 := rn(r, i)
+	c4 := rn(r, i+1)
+	c5 := rn(r, i+2)
+	c6 := rn(r, i+3)
+	c := [7]uint64{c0, c1, c2, c3, c4, c5, c6}
+
+	n := 0
+	out[n] = hstart(0) // bias
+	n++
+
+	// unigrams (7)
+	for k := 0; k < 7; k++ {
+		h := hstart(1)
+		h = hstep(h, uint64(k))
+		h = hstep(h, c[k])
+		out[n] = h
+		n++
+	}
+	// bigrams (6)
+	for k := 0; k < 6; k++ {
+		h := hstart(2)
+		h = hstep(h, uint64(k))
+		h = hstep(h, c[k])
+		h = hstep(h, c[k+1])
+		out[n] = h
+		n++
+	}
+	// trigrams (5)
+	for k := 0; k < 5; k++ {
+		h := hstart(3)
+		h = hstep(h, uint64(k))
+		h = hstep(h, c[k])
+		h = hstep(h, c[k+1])
+		h = hstep(h, c[k+2])
+		out[n] = h
+		n++
+	}
+	// type unigrams at offsets -1,0,+1 (3)
+	tm1, t0, tp1 := runeType(c2), runeType(c3), runeType(c4)
+	for k, tv := range [3]uint64{tm1, t0, tp1} {
+		h := hstart(4)
+		h = hstep(h, uint64(k))
+		h = hstep(h, tv)
+		out[n] = h
+		n++
+	}
+	// type bigram (type@0,type@+1) (1)
+	h := hstart(5)
+	h = hstep(h, t0)
+	h = hstep(h, tp1)
+	out[n] = h
+	n++
+	// script-change flag between rune i and i+1 (1)
+	sc := uint64(0)
+	if t0 != tp1 {
+		sc = 1
+	}
+	out[n] = hstep(hstart(6), sc)
+	n++
+	return n
+}
+
+// scoreAt returns the classifier score for a boundary after rune i.
+func (m *Model) scoreAt(r []rune, i int) float64 {
+	var buf [maxFeat]uint64
+	n := features(r, i, &buf)
+	var s float64
+	for k := 0; k < n; k++ {
+		s += float64(m.w[buf[k]&m.mask])
+	}
+	return s
+}
+
+// isSpaceRune reports an ASCII/NBSP whitespace rune.
+func isSpaceRune(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f' || r == 0x00A0
+}
+
+func isTerm(r rune) bool {
+	switch r {
+	case '.', '!', '?', '…', '。', '！', '？':
+		return true
+	}
+	return false
+}
+
+func isOpenQuote(r rune) bool {
+	switch r {
+	case '“', '«', '「', '『', '„':
+		return true
+	}
+	return false
+}
+
+// isCandidate reports whether a sentence boundary is allowed after rune i — the
+// only positions the classifier evaluates. Detected from characters alone (no
+// tokenizer): the doc end, before whitespace, after terminal punctuation, or
+// before an opening dialogue quote.
+func isCandidate(r []rune, i int) bool {
+	if i == len(r)-1 {
+		return true
+	}
+	if isSpaceRune(r[i+1]) {
+		return true
+	}
+	if isTerm(r[i]) {
+		return true
+	}
+	if isOpenQuote(r[i+1]) {
+		return true
+	}
+	return false
+}
+
+// Boundaries returns, for the rune slice, whether a sentence boundary follows
+// each rune (true only at candidate positions the model cut). Exposed for
+// evaluation; the last rune is always a boundary.
+func (m *Model) Boundaries(r []rune) []bool {
+	b := make([]bool, len(r))
+	if len(r) == 0 {
+		return b
+	}
+	for i := 0; i < len(r); i++ {
+		if i == len(r)-1 {
+			b[i] = true
+			continue
+		}
+		if isCandidate(r, i) && m.scoreAt(r, i) > 0 {
+			b[i] = true
+		}
+	}
+	return b
+}
+
+// Split segments text into sentences. Single pass over the runes, no tokenizer.
+// Returns nil for empty input.
+func (m *Model) Split(text string) []string {
+	if text == "" {
+		return nil
+	}
+	r := []rune(text)
+	var out []string
+	prev := 0
+	for i := 0; i < len(r); i++ {
+		cut := i == len(r)-1
+		if !cut && isCandidate(r, i) && m.scoreAt(r, i) > 0 {
+			cut = true
+		}
+		if cut {
+			if s := strings.TrimSpace(string(r[prev : i+1])); s != "" {
+				out = append(out, s)
+			}
+			prev = i + 1
+		}
+	}
+	return out
+}
+
+// Split segments text with the default (permissive, license-clean) model.
+func Split(text string) []string { return Default().Split(text) }
+
+// NewModel builds a Model from a hashed weight slice (len must be a power of
+// two). Used by the trainer.
+func NewModel(w []float32) *Model {
+	return &Model{w: w, mask: uint64(len(w) - 1)}
+}
+
+// Save writes the model as: a "#bits\tN" header then one "index\tweight" line
+// per nonzero weight (sparse).
+func (m *Model) Save(wtr io.Writer) error {
+	bw := bufio.NewWriter(wtr)
+	bits := 0
+	for (1 << bits) < len(m.w) {
+		bits++
+	}
+	if _, err := bw.WriteString("#bits\t" + strconv.Itoa(bits) + "\n"); err != nil {
+		return err
+	}
+	for i, v := range m.w {
+		if v == 0 {
+			continue
+		}
+		if _, err := bw.WriteString(strconv.Itoa(i)); err != nil {
+			return err
+		}
+		if err := bw.WriteByte('\t'); err != nil {
+			return err
+		}
+		if _, err := bw.WriteString(strconv.FormatFloat(float64(v), 'g', -1, 32)); err != nil {
+			return err
+		}
+		if err := bw.WriteByte('\n'); err != nil {
+			return err
+		}
+	}
+	return bw.Flush()
+}
+
+// LoadModel reads a model written by Save.
+func LoadModel(rdr io.Reader) (*Model, error) {
+	sc := bufio.NewScanner(rdr)
+	sc.Buffer(make([]byte, 0, 1<<16), 1<<20)
+	bits := 20
+	var w []float32
+	for sc.Scan() {
+		line := sc.Text()
+		if strings.HasPrefix(line, "#bits\t") {
+			bits, _ = strconv.Atoi(strings.TrimSpace(line[len("#bits\t"):]))
+			w = make([]float32, 1<<bits)
+			continue
+		}
+		if w == nil {
+			w = make([]float32, 1<<bits)
+		}
+		t := strings.IndexByte(line, '\t')
+		if t < 0 {
+			continue
+		}
+		idx, err := strconv.Atoi(line[:t])
+		if err != nil || idx < 0 || idx >= len(w) {
+			continue
+		}
+		v, _ := strconv.ParseFloat(line[t+1:], 32)
+		w[idx] = float32(v)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if w == nil {
+		w = make([]float32, 1<<bits)
+	}
+	return NewModel(w), nil
+}

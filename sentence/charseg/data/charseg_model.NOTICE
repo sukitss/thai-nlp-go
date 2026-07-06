@@ -1,0 +1,47 @@
+charseg_model.tsv — provenance and licensing
+=============================================
+
+What it is
+----------
+A character-level sentence-boundary classifier (averaged perceptron over hashed
+character n-gram + character-type features) for the NOVEL domain: translated
+Chinese/Japanese and Thai web novels. It is the "outside-the-box" fast
+counterpart to the word-level CRF (sentence/crf): no word tokenizer, a single
+pass over characters, and a tiny hashed weight table.
+
+Exposed as the opt-in charseg.Novel() specialist. For general multi-domain text
+use the recommended default, charseg.Default() (the permissive clean model in
+charseg_model_clean.tsv); this novel model transfers poorly to formal prose.
+
+How it was made (recipe)
+------------------------
+Weak supervision (self-labelled silver corpus), no external gold corpus — the
+same labelling as the CRF novel model, so the two are directly comparable:
+
+  1. Source text: Thai novel chapters from our own novel platform — text we own.
+     No third-party corpus is used. (Trained on novels_real.csv.)
+  2. Silver labelling: tokenize a line with the default segmenter to find silver
+     sentence boundaries from ORTHOGRAPHIC signals only — a token ending in a
+     closing quote (” " » 」 』 ’) or terminal punctuation (. ! ? … 。 ！ ？), and
+     the token before an opening dialogue quote (“ « 「 『 „). Bare inter-word
+     spaces are NON-boundaries. The silver boundary is then projected onto the
+     last CHARACTER of the ending token; the classifier is trained per character.
+  3. Train: averaged perceptron (charseg.Train), 12 iterations, feature hashing
+     into 2^20 float32 weights (stored sparse; ~3k nonzero → ~21 KB).
+
+Measured quality (held-out silver; see cmd/charsegtrain)
+--------------------------------------------------------
+  - Internal doc-disjoint held-out (no-leak model): boundary-F1 0.9950
+      (P 0.9995 / R 0.9905), vs CRF-novel 0.9895, whitespace 0.3240.
+  - Fully separate FILE (novel.csv): boundary-F1 0.7733 (P 1.0000 / R 0.6304),
+      tying the CRF-novel model.
+  - UD_Thai-PUD (out-of-domain, never trained on): 0.0792 — like CRF-novel
+      (0.0799); both novel-trained models transfer poorly to formal PUD prose.
+
+Speed (see BenchmarkEngines): ~25x faster than the CRF and needs no tokenizer.
+
+Licensing
+---------
+Derived from novel text we own via self weak-supervision. The model stores
+aggregate hashed feature weights (statistical parameters, not reconstructable
+prose). Shippable under the project licence.

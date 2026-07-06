@@ -29,6 +29,7 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`stopwords`](stopwords) | Stop-word filtering: Thai/English + curated CJK/JP/KR function words + `Multilingual()` | ✅ |
 | [`vocab`](vocab) | Term → sequential-id vocabulary + DF/IDF (sparse/BM25 indexing) | ✅ |
 | [`sentence`](sentence) | Sentence splitting — selectable engines: `Whitespace` (fastest), `Heuristic` (ender/starter words, no model, ~14× faster than CRF), and `crf` (crfcut, most accurate) | ✅ |
+| [`sentence/charseg`](sentence/charseg) | Character-level, single-pass, no-tokenizer sentence segmenter — ~25× faster than the CRF, pure-Go, permissive-clean model; wins macro boundary-F1 on a fair multi-domain eval (CRF still leads formal news) | ✅ |
 | [`chunk`](chunk) | Offset-true hierarchical chunking (RAG ingestion) | ✅ |
 | [`translit`](translit) | Name-variant matching (MetaSound/Udom83/LK82 + edit distance); cross-lingual pinyin→Thai bridge (聂力/Nie Li/เนี่ยหลี่ in one bucket) | ✅ |
 
@@ -329,6 +330,40 @@ the training data is CC BY-SA and not bundled).
 model := crf.Train(examples, 10)          // examples: tokens + I/E labels
 m := crf.Eval(model.Labels, goldExamples) // E-precision/recall/F1
 ```
+
+### Character-level sentence segmenter (`charseg`)
+
+`sentence/charseg` is an outside-the-box alternative to the CRF: a
+**character-level, single-pass, no-tokenizer** boundary classifier. The CRF
+spends most of its time tokenizing and building word-n-gram features; `charseg`
+skips both and scores boundaries directly from character n-grams at a small set
+of candidate positions (before whitespace, after terminal punctuation, before an
+opening quote). The result is **~25× faster than the CRF**, pure-Go, CPU-only,
+with tiny models (~20–420 KB embedded) and no word tokenizer.
+
+```go
+import "github.com/sukitss/thai-nlp-go/sentence/charseg"
+
+charseg.Split("เขาพูดว่า “ไปกันเถอะ” แล้วเดินออกไป ฝนเริ่มตกลงมา")
+// charseg.Default() — permissive, recommended (also charseg.Split)
+// charseg.Novel()   — novel/dialogue-domain specialist, opt-in
+```
+
+**Honest accuracy.** On a fair multi-domain evaluation `charseg.Default` **wins
+the macro-averaged (equal-per-domain) boundary-F1: 0.663 vs 0.559 for
+`crf.Default`**, and leads on dialogue, social/chat, poetry, tricky
+abbreviation/date tokens, and a held-out hand-annotated CC0 gold set (0.450 vs
+0.397). It is **not** a clean win everywhere: the CRF is still stronger on formal
+news / UD-style prose (UD_Thai-PUD 0.653 vs 0.593) and on the news-weighted
+micro-pooled score (0.662 vs 0.618). Pick `charseg` for speed and mixed/informal
+text; keep the CRF for formal-news-heavy corpora. Full per-domain numbers are in
+[`charseg_model_clean.NOTICE`](sentence/charseg/data/charseg_model_clean.NOTICE).
+
+**License.** The default model is trained **only on permissive data** — Tatoeba
+(CC BY 2.0 FR), CC0 government/social text, MIT/Public-Domain literature, and our
+own text — with **no NC/ND/SA corpus and no crfcut teacher**, so the shipped
+weights are safe to redistribute under a permissive/CC0 license. The held-out
+hand-annotated CC0 gold benchmark is released alongside the model.
 
 ## One call for mixed-language text
 

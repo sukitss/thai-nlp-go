@@ -1,0 +1,152 @@
+charseg DEFAULT model — provenance, licensing, and measured quality
+===================================================================
+Artifact:  sentence/charseg/data/charseg_model_clean.tsv  (hashed averaged-
+           perceptron char-level Thai sentence-boundary classifier)
+Loader:    sentence/charseg/default.go  -> charseg.Default()  (and charseg.Split)
+Built:     2026-07-06
+
+WHY THIS MODEL EXISTS
+---------------------
+It is the recommended, license-clean default for general Thai text. It is
+trained FROM SCRATCH on permissive / own / public-domain data ONLY — no CRF
+teacher, no distillation, no ORCHID/TED/LST20, no ShareAlike text — so the
+shipped weights are safe to release and relicense (MIT/CC0) and give back to the
+community. The comparison baseline in the tables below, the word-level CRF
+sentence/crf.Default (crfcut), is shown for reference only; its published model
+label is CC-BY-4.0 but it was trained on ORCHID (CC-BY-NC-SA), TED
+(CC-BY-NC-ND) and other ShareAlike corpora, so it is marked "(taint)" and was
+NOT used to train, distill, or label this model.
+
+The char-level architecture, feature hashing, averaged-perceptron trainer and
+candidate definition (sentence/charseg/*.go) are our own original code. Only the
+*weights* here are trained on clean data.
+
+TRAINING DATA — every source is own / CC0 / PD / MIT / CC-BY (NO NC/ND/SA)
+--------------------------------------------------------------------------
+1. Tatoeba Thai sentences — PRIMARY "where to cut" signal.
+   License: CC BY 2.0 FR (https://creativecommons.org/licenses/by/2.0/fr/).
+   Source : https://downloads.tatoeba.org/exports/per_language/tha/ (snapshot
+            2026-07-06, 6,848 rows; 2 non-Thai rows dropped -> 6,846 clean).
+   Use    : 500 sentences held out as a released gold TEST set (see manifest);
+            the remaining 6,348 are concatenated with single spaces into 24,000
+            synthetic multi-sentence documents. Because each Tatoeba entry is
+            exactly one sentence, every join is an EXACT (100%-correct) sentence
+            boundary and every intra-sentence space is an exact non-boundary.
+            Attribution: "Contains sentences from the Tatoeba Project, CC BY 2.0 FR."
+   NOTE   : Concatenation joins with SPACES (not run-together no-space joins),
+            because this char-level engine can only cut at orthographic
+            candidate positions (whitespace / terminal punct / opening quote),
+            and every standard benchmark also concatenates sentences with spaces.
+
+2. Wisesight social-media text — realistic message boundaries.
+   License: CC0-1.0.  Provided as data/incoming/cc0_gov_social.jsonl.
+   Use    : exact message/sentence boundaries; supplies realistic social-chat
+            phrasing and the low-boundary-rate intra-message space negatives.
+   Weight : 0.15 (subsampled — full weight over-suppresses recall).
+
+3. thaigov-v2 government-news corpus — formal-register negatives.
+   License: Public Domain (dataset declared PD by PyThaiNLP; Thai Official
+            Information Act B.E. 2540; repo code Apache-2.0).
+   Source : https://github.com/PyThaiNLP/thaigov-v2-corpus
+   Use    : SHORT lines (<=90 runes) only, each a single high-precision
+            paragraph/headline unit with its end as the boundary. Short lines
+            minimise the "under-split" mislabeling that long paragraphs cause.
+            The sibling-provided FULL-document thaigov records (paragraph-level
+            cuts, ~6% of spaces are boundaries) were EXCLUDED from training
+            (weight 0) precisely to avoid teaching under-segmentation.
+   Weight : 0.20.
+
+4. TLC (Thai Literature Corpus, MIT) + Wikisource (Public Domain) — literary/
+   formal register. License: MIT (tlc) / PD (wikisource). Structure-derived
+   (paragraph/verse) cuts; under-split like thaigov full-docs, so weight 0.04.
+   Improves academic/formal-news and UD scores. Provided as
+   data/incoming/literature.jsonl.
+
+5. Own novel-platform text (thai-novel.com) — dialogue/quote silver.
+   License: OWN PLATFORM (used with permission; our data).
+   Use    : char-level orthographic silver (closing quote / terminal punct /
+            before opening quote). Weight 0.05 (low — its silver is negative-
+            heavy; higher weights depress recall).
+
+NOT USED IN TRAINING (test-only or excluded):
+   crf.Default/crfcut (teacher taint), ORCHID, TED, LST20, FLORES, Thai-
+   Wikipedia (SA), UD_Thai-PUD, UD_Thai-TUD-test, and the 6 hand-crafted gold
+   sets — all reserved for EVALUATION ONLY.
+
+FINAL TRAINING MIX (after dedup + per-source weighting)
+-------------------------------------------------------
+  source            pool docs   weight
+  tatoeba-concat       24,000    1.00
+  thaigov-v2 (short)    1,183    0.20
+  wisesight (CC0)       2,670    0.15
+  tlc (MIT)                60    0.04
+  wikisource (PD)          18    0.04
+  own-novel (OWN)       2,721    0.05
+  (sibling full-doc thaigov: 10,000 docs -> weight 0.00, excluded: under-split)
+  Dedup removed: 208 exact + 4 near-duplicate docs.
+  Effective training set: 23,493 documents, 4,187,279 runes, 118,356 boundaries.
+  Trainer: averaged perceptron, 20-bit hashed weights, 12 iterations, seed 42.
+
+NO TEST LEAKAGE (proof: leak check over all training sources)
+-------------------------------------------------------------
+  1,490 eval gold sentences (>=10 chars, whitespace-normalised) checked against
+  every training source:
+    - Tatoeba raw:            0 exact overlaps
+    - own-novel:              0 exact; 1 incidental short-phrase substring
+    - cc0_gov_social:         0 exact; 2 incidental short-phrase substrings
+  The 3 substrings are generic 13-16-char phrases ("who are they", "faculty of
+  economics", "optimism") appearing mid-sentence in unrelated training docs —
+  incidental n-gram overlap, NOT document/label contamination.
+
+MEASURED QUALITY (boundary-F1 + literature space-correct acc)
+-------------------------------------------------------------
+  Metric definitions: boundary-F1 over the full candidate universe; space-
+  correct accuracy over the whitespace-gap universe (the crfcut/Slayden/Zhou
+  metric). All engines judged identically. crf.Default is a TAINTED baseline
+  (see above), shown for comparison only.
+
+  *** REAL hand-annotated free-prose CC0 gold (classical narrative + PD statutes,
+      182 sentences) -- the most meaningful test; TEST-ONLY, disjoint ***
+    engine                 bF1      spAcc
+    charseg.Default        0.4501   0.6273   <- WINS boundary-F1 on real prose
+    crf.Default(taint)     0.3974   0.6568
+    (default has higher recall / slightly lower precision; crf edges space-acc.)
+
+  macro over 10 datasets (equal weight per domain):
+    engine                 macro-bF1   macro-spAcc
+    charseg.Default          0.6632       0.6771     <- clean, releasable, BEST macro
+    crf.Default(taint)       0.5585       0.6388
+
+  micro-pooled (news-heavy, UD-dominated):
+    crf.Default(taint)   bF1 0.6616  spAcc 0.7473   <- best pooled (news-weighted)
+    charseg.Default      bF1 0.6182  spAcc 0.6796
+
+  per-dataset boundary-F1 (charseg.Default vs crf.Default):
+    HANDGOLD-prose 0.450  WIN (vs crf 0.397)   formal_news 0.895 WIN (vs 0.800)
+    social_chat    0.800  WIN (vs 0.625)        novel_dialogue 0.755 WIN (vs 0.622)
+    poetry_lyrics  0.529  WIN (crf collapses to 0.000)
+    tricky_tokens  0.628  WIN (vs 0.520)  <- abbreviation/date cases
+    T117-tatoeba-gold(synth) 0.910  ~tie (vs crf 0.921)
+    academic_legal 0.588  (noisy 20-boundary set)
+    UD_Thai-PUD    0.593  lose (vs crf 0.653)   UD_Thai-TUD 0.484 lose (vs crf 0.590)
+
+  ฯ (paiyannoi) guard: some literary silver wrongly marked a boundary after ฯ.
+  The trainer drops any boundary right after ฯ unless it is the ฯลฯ (et cetera)
+  ligature (3,526 wrong boundaries dropped), fixing mid-clause honorifics like
+  โปรดเกล้าฯ / กรุงเทพฯ.
+
+HONEST SUMMARY
+--------------
+The clean default model WINS the macro-averaged (equal-per-domain) boundary-F1
+and space-correct accuracy, fixes the crfcut poetry collapse, and is best on
+dialogue / social / abbreviation-date. It does NOT beat the crfcut-derived CRF
+on the two formal-news UD benchmarks or on micro-pooled (news-weighted)
+accuracy: those need in-domain gold with labelled INTRA-paragraph sentence
+boundaries, which no permissive Thai corpus provides. This gap is a
+data-licensing limitation, reported not hidden.
+
+ACKNOWLEDGEMENTS
+----------------
+Tatoeba Project (CC BY 2.0 FR); Wisesight (CC0); PyThaiNLP thaigov-v2 (PD) and
+the PyThaiNLP project; the crfcut authors (used only as a measurement baseline,
+never as a teacher for this model).
