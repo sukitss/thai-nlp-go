@@ -26,10 +26,19 @@ func main() {
 	evalPaths := flag.String("eval", "", "comma-separated CoNLL-U eval files")
 	iters := flag.Int("iters", 10, "perceptron iterations")
 	out := flag.String("out", "", "write trained model to this file")
+	novelCSV := flag.String("novel", "", "comma-separated novel CSV files (weak-supervision silver corpus)")
+	novelEval := flag.String("noveleval", "", "optional separate novel CSV(s) for held-out eval (else internal split)")
+	novelCol := flag.String("col", "text", "text column name in the novel CSV")
+	holdout := flag.Float64("holdout", 0.2, "held-out fraction for -novel mode (ignored if -noveleval set)")
 	flag.Parse()
 
+	if *novelCSV != "" {
+		runNovel(*novelCSV, *novelEval, *novelCol, *holdout, *iters, *out)
+		return
+	}
+
 	if *trainPath == "" {
-		fmt.Fprintln(os.Stderr, "need -train")
+		fmt.Fprintln(os.Stderr, "need -train (or -novel)")
 		os.Exit(2)
 	}
 	train := readDocs(*trainPath)

@@ -52,3 +52,30 @@ func TestEmpty(t *testing.T) {
 		t.Errorf("Split(\"\") = %v, want nil", got)
 	}
 }
+
+// TestNovelModel checks the embedded novel-domain model loads and segments
+// dialogue-heavy novel text at quote/punctuation boundaries where the default
+// (TED-trained) model does not.
+func TestNovelModel(t *testing.T) {
+	m := Novel()
+	if m == nil || len(m.feats) == 0 {
+		t.Fatal("Novel() returned an empty model")
+	}
+	if got := m.Split(""); got != nil {
+		t.Errorf("Novel().Split(\"\") = %v, want nil", got)
+	}
+	// Two dialogue turns: the model should cut after the closing quote.
+	text := "“ปล่อยฉันไปนะ” เธอตะโกน “ฉันจ่ายเงินให้แล้ว”"
+	got := m.Split(text)
+	if len(got) < 2 {
+		t.Errorf("Novel().Split gave %d segment(s), want >=2: %q", len(got), got)
+	}
+	// Concurrent reads must be safe (shared read-only model).
+	done := make(chan struct{})
+	for i := 0; i < 4; i++ {
+		go func() { _ = m.Split(text); done <- struct{}{} }()
+	}
+	for i := 0; i < 4; i++ {
+		<-done
+	}
+}

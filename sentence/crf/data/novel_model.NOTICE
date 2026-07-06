@@ -1,0 +1,57 @@
+novel_model.tsv — provenance and licensing
+===========================================
+
+What it is
+----------
+A linear-chain CRF sentence-segmentation model (same format/features as the
+crfcut model) retrained for the NOVEL domain: translated Chinese/Japanese and
+Thai web novels. The default crfcut model is trained on TED subtitles and
+generalises poorly to novel prose; this model is the in-domain replacement.
+
+How it was made (recipe)
+------------------------
+Weak supervision (self-labelled silver corpus), no external gold corpus:
+
+  1. Source text: Thai novel chapters from our own novel platform (TNV1 /
+     thai-novel.com) — text we own. No third-party corpus is used.
+  2. Silver labelling (cmd/crftrain, -novel mode): tokenize with the default
+     segmenter (whitespace kept) and mark a sentence boundary ('E') using only
+     ORTHOGRAPHIC signals that are high-precision in this domain:
+       - a token ending in a closing quote (” " » 」 』 ’) or terminal
+         punctuation (. ! ? … 。 ！ ？), and
+       - the token immediately before an opening dialogue quote (“ « 「 『 „).
+     Bare inter-word spaces are treated as NON-boundaries (in Thai novels they
+     are mostly intra-sentence clause separators — the ambiguity the CRF
+     resolves). The labelling is independent of the CRF's own lexical features,
+     so the before/after comparison is not circular.
+  3. Train: averaged structured perceptron (crf.Train), 12 iterations.
+
+Measured quality (held-out silver)
+----------------------------------
+  - Internal 80/20 split : trained E-F1 0.9652 (P 0.9993 / R 0.9334)
+      vs crfcut(TED) 0.1163, whitespace 0.2819.
+  - Fully separate file  : trained E-F1 0.9782 (P 1.0000 / R 0.9574)
+      vs crfcut(TED) 0.6252, whitespace 0.6586.
+
+Known limitation
+----------------
+The silver marks dialogue/punctuation boundaries only; pure narration sentences
+that end without punctuation or a paragraph break are under-segmented. To improve
+recall, re-derive the silver from non-chunked source that preserves paragraph /
+line breaks (a strong extra boundary signal) and retrain.
+
+Licensing
+---------
+Derived from novel text we own via self weak-supervision. The model stores
+aggregate CRF feature weights over short (≤3) word n-grams — statistical
+parameters, not reconstructable prose — analogous to the upstream crfcut model.
+Shippable under the project licence.
+
+Note on LST20: the LST20 Thai treebank (NECTEC/AIForThai) has explicit sentence
+and clause boundaries and is often cited as CC BY 3.0, but its official
+distribution terms (aiforthai.in.th) require registration/agreement and state
+that "modification and redistribution of the dataset by any means are strictly
+prohibited unless authorized by the corpus authors." It is gated (not freely
+downloadable) and is NOT used here; a model shipped from it would need NECTEC
+authorization. It remains the recommended clean gold corpus IF such authorization
+is obtained.
