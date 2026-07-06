@@ -318,6 +318,21 @@ func (m *Model) Split(text string) []string {
 // Split segments text with the default (permissive, license-clean) model.
 func Split(text string) []string { return Default().Split(text) }
 
+// RecallLeanTau is the operating point (τ) that maximizes macro boundary-F1 for
+// the embedded Default model across a 10-register Thai eval: leave-one-dataset-out
+// honest macro boundary-F1 ≈ 0.698 vs 0.663 at τ=0 (+0.035), reaching ~96% of the
+// best-per-register oracle. It keeps more candidate spaces as boundaries (higher
+// recall, still well above whitespace on precision). It is MODEL-SPECIFIC — the
+// value is tied to this model's score scale; retraining requires re-tuning via a
+// τ sweep. For precision-sensitive use keep the τ=0 default (Split).
+const RecallLeanTau = -11.0
+
+// RecallLean segments text with the default model at the recall-leaning operating
+// point (RecallLeanTau): it trades a little precision for recall and lifts macro
+// boundary-F1 ~+0.035 over Split on a fair multi-domain eval. Equivalent to
+// Default().SplitTau(text, RecallLeanTau).
+func RecallLean(text string) []string { return Default().SplitTau(text, RecallLeanTau) }
+
 // NewModel builds a Model from a hashed weight slice (len must be a power of
 // two). Used by the trainer.
 func NewModel(w []float32) *Model {

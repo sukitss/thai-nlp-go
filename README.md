@@ -347,7 +347,17 @@ import "github.com/sukitss/thai-nlp-go/sentence/charseg"
 charseg.Split("เขาพูดว่า “ไปกันเถอะ” แล้วเดินออกไป ฝนเริ่มตกลงมา")
 // charseg.Default() — permissive, recommended (also charseg.Split)
 // charseg.Novel()   — novel/dialogue-domain specialist, opt-in
+// charseg.RecallLean(text) — recall-leaning operating point (+~0.035 macro-F1)
+// m.SplitTau(text, τ) / m.ScoreAt(r, i) — tune the operating point yourself
 ```
+
+**Operating point (recall-lean mode).** A boundary is predicted when the
+per-candidate score exceeds a threshold τ (default 0). Lowering τ keeps more
+spaces as boundaries — higher recall, lower precision. `charseg.RecallLean`
+pins τ to the value that maximizes macro boundary-F1 on a 10-register eval
+(leave-one-dataset-out honest **0.698 vs 0.663**, +0.035, ~96 % of the
+best-per-register oracle). It's a single scalar knob, no retrain; τ is
+model-specific (re-tune with `SplitTau`/`ScoreAt` if you retrain).
 
 **Honest accuracy.** On a fair multi-domain evaluation `charseg.Default` **wins
 the macro-averaged (equal-per-domain) boundary-F1: 0.663 vs 0.559 for
