@@ -173,6 +173,17 @@ func (m *Model) scoreAt(r []rune, i int) float64 {
 	return s
 }
 
+// ScoreAt returns the raw per-candidate boundary score after rune i (the model
+// predicts a boundary at a candidate iff this score exceeds the operating
+// threshold τ; the default Boundaries uses τ=0). Exposed for operating-point
+// tuning and analysis. The score at non-candidate positions is meaningless
+// (those positions are never cut); callers should gate on IsCandidate.
+func (m *Model) ScoreAt(r []rune, i int) float64 { return m.scoreAt(r, i) }
+
+// IsCandidate reports whether a boundary is allowed after rune i (see the
+// unexported isCandidate). Exposed for operating-point analysis.
+func IsCandidate(r []rune, i int) bool { return isCandidate(r, i) }
+
 // isSpaceRune reports an ASCII/NBSP whitespace rune.
 func isSpaceRune(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f' || r == 0x00A0
@@ -232,6 +243,52 @@ func (m *Model) Boundaries(r []rune) []bool {
 		}
 	}
 	return b
+}
+
+// BoundariesTau is like Boundaries but predicts a boundary at a candidate when
+// the model score exceeds a caller-supplied threshold τ instead of 0. Lowering
+// τ (τ<0) keeps more candidates as boundaries (recall-lean, toward whitespace);
+// raising τ is more selective (higher precision). BoundariesTau(r, 0) is
+// identical to Boundaries(r). The final rune is always a boundary.
+func (m *Model) BoundariesTau(r []rune, tau float64) []bool {
+	b := make([]bool, len(r))
+	if len(r) == 0 {
+		return b
+	}
+	for i := 0; i < len(r); i++ {
+		if i == len(r)-1 {
+			b[i] = true
+			continue
+		}
+		if isCandidate(r, i) && m.scoreAt(r, i) > tau {
+			b[i] = true
+		}
+	}
+	return b
+}
+
+// SplitTau segments text like Split but at operating threshold τ (see
+// BoundariesTau). SplitTau(text, 0) is identical to Split(text).
+func (m *Model) SplitTau(text string, tau float64) []string {
+	if text == "" {
+		return nil
+	}
+	r := []rune(text)
+	var out []string
+	prev := 0
+	for i := 0; i < len(r); i++ {
+		cut := i == len(r)-1
+		if !cut && isCandidate(r, i) && m.scoreAt(r, i) > tau {
+			cut = true
+		}
+		if cut {
+			if s := strings.TrimSpace(string(r[prev : i+1])); s != "" {
+				out = append(out, s)
+			}
+			prev = i + 1
+		}
+	}
+	return out
 }
 
 // Split segments text into sentences. Single pass over the runes, no tokenizer.

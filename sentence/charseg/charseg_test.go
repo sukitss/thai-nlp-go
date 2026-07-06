@@ -85,6 +85,33 @@ func TestConcurrentSplit(t *testing.T) {
 	wg.Wait()
 }
 
+func TestBoundariesTauMatchesDefault(t *testing.T) {
+	m := Default()
+	in := []rune("สวัสดีครับ วันนี้อากาศดีมาก. เขาพูดว่า “ไปกันเถอะ” แล้วก็เดินจากไป")
+	def := m.Boundaries(in)
+	// τ=0 must exactly reproduce the default Boundaries operating point.
+	tau0 := m.BoundariesTau(in, 0)
+	if len(def) != len(tau0) {
+		t.Fatalf("len mismatch %d != %d", len(def), len(tau0))
+	}
+	for i := range def {
+		if def[i] != tau0[i] {
+			t.Fatalf("BoundariesTau(0) != Boundaries at %d", i)
+		}
+	}
+	// Recall-lean: lower τ never DROPS a boundary the default kept (monotone).
+	lean := m.BoundariesTau(in, -20)
+	for i := range def {
+		if def[i] && !lean[i] {
+			t.Fatalf("lower τ dropped a default boundary at %d (not recall-lean)", i)
+		}
+	}
+	// SplitTau(·,0) matches Split.
+	if strings.Join(m.Split(string(in)), "|") != strings.Join(m.SplitTau(string(in), 0), "|") {
+		t.Fatal("SplitTau(·,0) != Split")
+	}
+}
+
 func mkBnd(s string, ends []int) []bool {
 	r := []rune(s)
 	b := make([]bool, len(r))
