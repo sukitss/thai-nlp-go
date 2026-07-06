@@ -369,6 +369,11 @@ micro-pooled score (0.662 vs 0.618). Pick `charseg` for speed and mixed/informal
 text; keep the CRF for formal-news-heavy corpora. Full per-domain numbers are in
 [`charseg_model_clean.NOTICE`](sentence/charseg/data/charseg_model_clean.NOTICE).
 
+The permissive gold set these numbers are measured on is released separately —
+a small CC0 / CC-BY Thai sentence-boundary set (905 sentences, 8 registers):
+[github.com/capytron/thai-sentence-boundaries](https://github.com/capytron/thai-sentence-boundaries)
+· [huggingface.co/datasets/sukity/thai-sentence-boundaries](https://huggingface.co/datasets/sukity/thai-sentence-boundaries).
+
 **License.** The default model is trained **only on permissive data** — Tatoeba
 (CC BY 2.0 FR), CC0 government/social text, MIT/Public-Domain literature, and our
 own text — with **no NC/ND/SA corpus and no crfcut teacher**, so the shipped
