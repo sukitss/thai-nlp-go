@@ -32,6 +32,7 @@ seg.SegmentBytes("ฉันรักภาษาไทยมาก", ' ')     //
 | [`sentence/charseg`](sentence/charseg) | Character-level, single-pass, no-tokenizer sentence segmenter — ~25× faster than the CRF, pure-Go, permissive-clean model; wins macro boundary-F1 on a fair multi-domain eval (CRF still leads formal news) | ✅ |
 | [`chunk`](chunk) | Offset-true hierarchical chunking (RAG ingestion) | ✅ |
 | [`translit`](translit) | Name-variant matching (MetaSound/Udom83/LK82 + edit distance); cross-lingual pinyin→Thai bridge (聂力/Nie Li/เนี่ยหลี่ in one bucket) | ✅ |
+| [`search`](search/README.md) | **Retrieval/matching primitive toolkit** — query understanding (parse + acronym expand), keyword extraction, term weighting (BM25 family/DFR/QL), inverted index + **WAND** top-k, in-memory dense-vector match (binary/PQ quantization + rerank), MinHash/SimHash/CountMin sketches, RRF/weighted fusion. No vector-DB, embedding server, or GPU. See [`search/README.md`](search/README.md) | ✅ |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, and
 [docs/TEST-REPORT.md](docs/TEST-REPORT.md) for a test/benchmark snapshot
