@@ -1,0 +1,30 @@
+# Thai-enterprise acronym / abbreviation seed — bidirectional equivalence groups.
+#
+# Each non-comment line is ONE equivalence group: whitespace-separated members
+# that all denote the same thing. The FIRST member is the canonical Latin
+# acronym (upper-case); the rest are its Thai transliteration and full forms.
+# Expansion is symmetric — any member expands to every member of its group — so
+# a query written in any of the forms becomes matchable against a document that
+# indexed a different one ("pc" ⇒ also พีซี, คอมพิวเตอร์).
+#
+# The Latin member also drives ACRONYM RETENTION during parsing: a bare
+# lower-case "it"/"pc"/"hr" that the base stop list would drop (or case-fold
+# away) is recognized here and kept as the upper-case acronym, so the short,
+# context-free query survives instead of collapsing to nothing.
+#
+# This is a GENERIC starter set. Real organizations have their own vocabulary
+# (team names, product codes, internal abbreviations) — a platform injects those
+# through WithAliases, which merge into these groups. Extend freely; keep one
+# group per line, canonical acronym first. Lines starting with '#' are comments.
+
+IT ไอที เทคโนโลยีสารสนเทศ
+PC พีซี คอมพิวเตอร์
+HR เอชอาร์ ทรัพยากรบุคคล ฝ่ายบุคคล
+ACC บัญชี
+FIN การเงิน ไฟแนนซ์
+MKT การตลาด มาร์เก็ตติ้ง
+ADMIN ธุรการ แอดมิน
+POS พีโอเอส จุดขาย แคชเชียร์
+OPS ปฏิบัติการ
+QA คิวเอ ควบคุมคุณภาพ
+SOP ขั้นตอนปฏิบัติงาน คู่มือ

@@ -1,0 +1,31 @@
+# Thai conversational query FILLER — dropped by search/query's Parser on TOP of
+# the base stop-word set, so a chatty question collapses to its content terms.
+#
+# These are the words a person adds around a search intent when they TALK to a
+# assistant instead of typing keywords: politeness particles, question/softener
+# particles, and generic verbs of intent (help/want/ask/summarize/find/contact).
+# They carry no retrieval signal for the document side, yet an embedded raw
+# sentence drags them along and drifts away from the formal indexed text.
+#
+# Entries are ATOMIC tokens as the newmm tokenizer emits them (a multi-syllable
+# phrase like "ช่วยสรุป" is split to ช่วย + สรุป, so list the pieces). Matching is
+# exact after acronym-aware folding, so an acronym is NEVER dropped here even if
+# it looks like one of these — acronym retention runs first. Lines starting with
+# '#' are comments; one or more tokens per line (whitespace-separated).
+#
+# This is DATA, deliberately editable: a platform tunes it per domain the same
+# way it tunes the acronym seed (see acronyms_th.txt). Curated conservatively —
+# only clearly-generic filler, never a word that could be a content entity.
+
+# politeness / sentence-final particles
+ครับ ค่ะ คะ ค่า ขา จ้ะ จ้า จ๊ะ จ๋า ฮะ ฮ่ะ ครับผม นะ น่ะ นะคะ นะครับ ล่ะ สิ ซิ
+
+# question / softener particles
+หน่อย ได้ ไหม มั้ย ไง ยังไง อย่างไร บ้าง รึ หรือเปล่า รึเปล่า ไหน อะไร ทำไม
+เท่าไหร่ เท่าไร หรอ เหรอ ป่ะ ปะ
+
+# generic verbs of intent (help / want / ask / summarize / find / contact)
+ช่วย ขอ อยาก ต้องการ รบกวน วาน สรุป หา ค้นหา ดู เอา ติดต่อ สอบถาม ถาม แจ้ง บอก ทำ อยู่
+
+# generic connectors / light nouns that survive the base stop list
+เรื่อง เกี่ยว การ แบบ ประมาณ
