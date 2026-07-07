@@ -150,3 +150,12 @@ ACKNOWLEDGEMENTS
 Tatoeba Project (CC BY 2.0 FR); Wisesight (CC0); PyThaiNLP thaigov-v2 (PD) and
 the PyThaiNLP project; the crfcut authors (used only as a measurement baseline,
 never as a teacher for this model).
+
+Update (v0.16.2): retrained with additional discriminative boundary features —
+character-class pairs across the candidate, an abbreviation-dot pattern
+(suppresses false cuts on พ.ศ./ด.ช./น.ส.), sentence-opener cues, and a curated
+sentence-final particle list spanning modern / question / emotive / classical-
+royal / Chinese- & Japanese-translated-novel / poetic / archaic registers
+(data/final_particles.txt). All are learned-weight features (no hard cuts).
+Same permissive training data; lifts the low-prior / verse / novel registers
+with no regression on the rest.
