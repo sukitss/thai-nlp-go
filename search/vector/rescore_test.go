@@ -21,12 +21,14 @@ func TestRescoreEqualsExactOverCandidates(t *testing.T) {
 
 	cand := coarse.TopK(q, 200) // fast, lossy candidate set
 	ids := make([]uint32, len(cand))
+	candVecs := make([][]float32, len(cand)) // parallel to ids for the reference
 	for i, h := range cand {
 		ids[i] = h.ID
+		candVecs[i] = vecs[h.ID]
 	}
 
 	got := exact.Rescore(q, ids, 10)
-	want := exactTopK(vecs, ids, q, 10)
+	want := exactTopK(candVecs, ids, q, 10) // exact scan restricted to the candidates
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Rescore != exact over candidates\n got=%v\nwant=%v", got, want)
 	}
