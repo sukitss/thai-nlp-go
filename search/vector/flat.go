@@ -20,6 +20,9 @@ type Flat struct {
 	codeLen int
 	ids     []uint32
 	codes   []byte
+
+	idxOnce sync.Once
+	idx     map[uint32]int // id → storage position, for Rescore (built lazily)
 }
 
 // NewFlat returns an empty Flat matcher backed by quantizer q.
@@ -57,6 +60,41 @@ func (f *Flat) TopK(query []float32, k int) []Hit {
 	tk := newTopK(k)
 	for i := 0; i < n; i++ {
 		tk.push(Hit{ID: f.ids[i], Score: sc.Score(f.code(i))})
+	}
+	return tk.result()
+}
+
+// Rescore re-ranks a candidate set (the ids from a coarse stage) with THIS
+// matcher's quantizer and returns the top-k, best first. This is the second
+// stage of the standard two-stage retrieval pattern: a cheap, lossy matcher
+// (e.g. Binary) returns top-N candidates, then an exact matcher (Float32 over
+// the same ids) Rescores them — recovering the tail the coarse stage lost while
+// keeping the coarse stage's speed/memory. Ids not present are skipped.
+//
+//	coarse := NewFlat(NewBinary(dim)); exact := NewFlat(NewFloat32(dim))
+//	// Add every (id, vec) to both.
+//	cand := coarse.TopKParallel(query, 200, workers)   // fast, lossy
+//	ids  := make([]uint32, len(cand))
+//	for i, h := range cand { ids[i] = h.ID }
+//	final := exact.Rescore(query, ids, 10)             // exact over 200 → top-10
+//
+// Not safe for concurrent use with Add (it builds an id index on first call).
+func (f *Flat) Rescore(query []float32, ids []uint32, k int) []Hit {
+	if k <= 0 || len(ids) == 0 {
+		return nil
+	}
+	f.idxOnce.Do(func() {
+		f.idx = make(map[uint32]int, len(f.ids))
+		for i, id := range f.ids {
+			f.idx[id] = i
+		}
+	})
+	sc := f.q.Query(query)
+	tk := newTopK(min(k, len(ids)))
+	for _, id := range ids {
+		if i, ok := f.idx[id]; ok {
+			tk.push(Hit{ID: id, Score: sc.Score(f.code(i))})
+		}
 	}
 	return tk.result()
 }
