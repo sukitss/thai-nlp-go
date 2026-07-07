@@ -1,0 +1,35 @@
+# Thai sentence-FINAL particles — boundary-cue feature for charseg.
+# A token whose stripped form ENDS WITH one of these, immediately before a
+# candidate space, fires a hashed feature (a LEARNED weight, not a hard cut).
+# Curated by register; overlaps and sometimes-medial items are fine because the
+# averaged perceptron learns each one's weight from context. Lines starting
+# with '#' are comments. One or more particles per line (whitespace-separated).
+#
+# NOTE: forms of address / pronouns that OPEN or sit MID-sentence are excluded
+# on purpose (ทูลกระหม่อม ใต้ฝ่าละอองธุลีพระบาท พระองค์ หม่อมฉัน ข้า เจ้า ท่าน นาง).
+
+# modern colloquial (statement / imperative)
+ครับ ค่ะ คะ ขา จ้ะ จ้า จ๊ะ จ๋า ค่า นะ น่ะ นะคะ นะครับ ล่ะ ล่ะครับ สิ ซิ หรอก หรอกนะ
+เลย เนอะ เน้อ แหละ นั่นแหละ นี่แหละ ด้วย ก็ได้ เถอะ เถิด แล้วกัน ครับผม แล้ว ว่า
+
+# question
+ไหม มั้ย หรือ รึ หรือเปล่า หรือไม่ ป่ะ ปะ ไย ฤๅ เล่า หนอ
+
+# emotive / exclamatory (informal, dialogue, rough)
+วะ ว่ะ โว้ย เว้ย เฟ้ย ยะ อ่ะ เฮ้ย โอ้ย ฮึ ฮ่า อือ อ้อ
+
+# classical / royal court
+เพคะ พ่ะย่ะค่ะ พระพุทธเจ้าข้า พระเจ้าข้า เจ้าค่ะ เจ้าขา ขอรับ ขอรับกระผม มิได้ ดอก แล นะเจ้าคะ
+
+# chinese-translated novel (wuxia / xianxia)
+เสียแล้ว เสียจริง เสียนี่ นั่นเอง นี่เอง เท่านั้น เท่านั้นเอง ก็เป็นได้ ก็แล้วกัน มิใช่หรือ
+เช่นนั้นหรือ กระนั้น ยิ่งนัก นักแล กระมัง เจียว หนา นั่นเทียว หามิได้ ก็หาไม่ นั่นแล
+
+# japanese-translated novel
+สินะ ล่ะนะ ด้วยล่ะ นั่นล่ะ งั้นหรือ นั่นสินะ ล่ะสิ
+
+# poetic / verse-final (คำสร้อย)
+เอย เฮย นา รา เทอญ เอ๋ย
+
+# religious / archaic-formal
+ฉะนี้ ฉะนั้น ดังนี้ ดังนี้แล ฉะนั้นแล ด้วยเทอญ

@@ -26,7 +26,9 @@ package charseg
 
 import (
 	"bufio"
+	_ "embed"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -91,7 +93,121 @@ func runeType(v uint64) uint64 {
 	return tOther
 }
 
-const maxFeat = 40
+// isThaiConsonant reports a Thai consonant rune (ก..ฮ), used by the
+// abbreviation-pattern feature (short Thai cluster + period, e.g. พ.ศ., ด.ช.).
+func isThaiConsonant(r rune) bool { return r >= 0x0E01 && r <= 0x0E2E }
+
+// Sentence-final particle cues (token-final signals that a candidate space is a
+// sentence boundary). Curated by register — modern colloquial, question,
+// emotive, classical/royal-court, Chinese- and Japanese-translated web-novel,
+// poetic, and archaic-formal — covering both the eval registers and the
+// production novel domains. These are END-of-sentence signals only; forms of
+// address / pronouns that open or sit mid-sentence are excluded (see the data
+// file header). A token whose stripped form ENDS WITH one of these fires a
+// hashed feature whose weight the perceptron LEARNS (not a hard cut), so
+// overlaps and sometimes-medial items are safe. The list is embedded from
+// data/final_particles.txt and sorted longest-first so the suffix scan prefers
+// the most specific match (เจ้าค่ะ before ค่ะ).
+//
+//go:embed data/final_particles.txt
+var finalParticlesData string
+
+var finalParticles = loadRuneList(finalParticlesData)
+
+// Sentence-opener cues: tokens that commonly begin a new sentence right after a
+// candidate space (a weak boundary signal on the following side).
+var sentenceOpeners = [][]rune{
+	[]rune("อย่างไรก็ตาม"), []rune("ดังนั้น"), []rune("เมื่อ"), []rune("ซึ่ง"),
+	[]rune("โดย"), []rune("แต่"), []rune("และ"),
+}
+
+// loadRuneList parses a whitespace/newline-separated word list (with '#'
+// comment lines) into deduplicated rune slices, sorted longest-first so a
+// suffix/prefix scan matches the most specific entry.
+func loadRuneList(data string) [][]rune {
+	seen := map[string]bool{}
+	var words []string
+	for _, line := range strings.Split(data, "\n") {
+		if s := strings.TrimSpace(line); s == "" || strings.HasPrefix(s, "#") {
+			continue
+		}
+		for _, w := range strings.Fields(line) {
+			if w == "" || strings.HasPrefix(w, "#") || seen[w] {
+				continue
+			}
+			seen[w] = true
+			words = append(words, w)
+		}
+	}
+	sort.SliceStable(words, func(i, j int) bool {
+		return len([]rune(words[i])) > len([]rune(words[j]))
+	})
+	out := make([][]rune, len(words))
+	for i, w := range words {
+		out[i] = []rune(w)
+	}
+	return out
+}
+
+// matchSuffix reports whether the runes ending at index i (inclusive) equal p.
+func matchSuffix(r []rune, i int, p []rune) bool {
+	start := i - len(p) + 1
+	if start < 0 {
+		return false
+	}
+	for k := 0; k < len(p); k++ {
+		if r[start+k] != p[k] {
+			return false
+		}
+	}
+	return true
+}
+
+// matchPrefix reports whether the runes starting at index j equal p.
+func matchPrefix(r []rune, j int, p []rune) bool {
+	if j < 0 || j+len(p) > len(r) {
+		return false
+	}
+	for k := 0; k < len(p); k++ {
+		if r[j+k] != p[k] {
+			return false
+		}
+	}
+	return true
+}
+
+// firstNonSpaceAfter returns the index of the first non-whitespace rune strictly
+// after index i, or -1 if none.
+func firstNonSpaceAfter(r []rune, i int) int {
+	for j := i + 1; j < len(r); j++ {
+		if !isSpaceRune(r[j]) {
+			return j
+		}
+	}
+	return -1
+}
+
+// prevTokenLen returns the length (in runes, capped) of the non-space run that
+// ends at index i — the "preceding token" before a candidate space.
+func prevTokenLen(r []rune, i int) int {
+	n := 0
+	for j := i; j >= 0 && !isSpaceRune(r[j]) && n < 64; j-- {
+		n++
+	}
+	return n
+}
+
+const maxFeat = 64
+
+// Ablation toggles for the discriminative boundary features (all default on).
+// featParticles: sentence-final particle cue (group 7). featOpener: sentence-
+// opener cue (group 8). featShape: char-class pair / abbreviation-dot / token-
+// length shape features (groups 9-11).
+const (
+	featParticles = true
+	featOpener    = true
+	featShape     = true
+)
 
 // features writes the (unmasked) hashed feature ids for a boundary decision
 // after rune i into out and returns the count. Character n-grams (1..3) over a
@@ -159,6 +275,78 @@ func features(r []rune, i int, out *[maxFeat]uint64) int {
 	}
 	out[n] = hstep(hstart(6), sc)
 	n++
+
+	// --- discriminative boundary-vs-phrase-internal features (additive) ---
+	// These distinguish a sentence-ending space from a phrase-internal space
+	// on low-prior/formal registers, without touching the char n-grams above.
+	// The group toggles below are for ablation; all default on.
+
+	// (7) sentence-final particle ending the token just before the candidate.
+	// Longest match only (the table is sorted longest-first), so a single, most-
+	// specific cue fires. A strong end-of-sentence signal (learned weight).
+	if featParticles {
+		for pid := 0; pid < len(finalParticles); pid++ {
+			if matchSuffix(r, i, finalParticles[pid]) {
+				out[n] = hstep(hstart(7), uint64(pid+1))
+				n++
+				break
+			}
+		}
+	}
+
+	if j := firstNonSpaceAfter(r, i); j >= 0 {
+		// (8) sentence-opener beginning the next token after the candidate space.
+		if featOpener {
+			for oid := 0; oid < len(sentenceOpeners); oid++ {
+				if matchPrefix(r, j, sentenceOpeners[oid]) {
+					out[n] = hstep(hstart(8), uint64(oid+1))
+					n++
+					break
+				}
+			}
+		}
+		// (9) char-class pair across the space: last rune of the previous token
+		// vs first rune of the next token (skips the whitespace itself, unlike
+		// the type bigram above which straddles rune i / i+1=space).
+		if featShape {
+			h9 := hstart(9)
+			h9 = hstep(h9, runeType(uint64(r[i])))
+			h9 = hstep(h9, runeType(uint64(r[j])))
+			out[n] = h9
+			n++
+		}
+	}
+
+	// (10) abbreviation-dot pattern (short Thai cluster + period, e.g. พ.ศ.,
+	// ด.ช., น.ส.) — a cue to SUPPRESS a false cut after an internal period.
+	if featShape && r[i] == '.' && i >= 1 && isThaiConsonant(r[i-1]) &&
+		(i < 2 || r[i-2] == '.' || isSpaceRune(r[i-2])) {
+		out[n] = hstep(hstart(10), 1)
+		n++
+	}
+
+	// (11) preceding-token length bucket (very short tokens before a space are
+	// less often a sentence end; helps suppress spurious cuts).
+	if featShape {
+		pl := prevTokenLen(r, i)
+		var lb uint64
+		switch {
+		case pl <= 1:
+			lb = 1
+		case pl == 2:
+			lb = 2
+		case pl == 3:
+			lb = 3
+		case pl <= 5:
+			lb = 4
+		case pl <= 8:
+			lb = 5
+		default:
+			lb = 6
+		}
+		out[n] = hstep(hstart(11), lb)
+		n++
+	}
 	return n
 }
 
