@@ -31,6 +31,12 @@ func NewFlat(q Quantizer) *Flat {
 }
 
 // Add encodes vec and stores it under id. Not safe for concurrent use.
+//
+// For a document whose text produced no embedding (empty or entirely
+// out-of-vocabulary — an [github.com/sukitss/thai-nlp-go/search/embed] embedder
+// returns a zero vector), Add the zero vector rather than skipping it: it scores
+// ~0 and never wins, but keeping it preserves the id↔position mapping the rest
+// of your index relies on. Skipping silently drops the doc from the corpus.
 func (f *Flat) Add(id uint32, vec []float32) {
 	if len(vec) != f.dim {
 		panic("vector: Flat.Add dim mismatch")

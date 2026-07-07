@@ -186,8 +186,35 @@ weights, for when tuned magnitudes should carry through. Both return the strict
 - **When:** any hybrid retriever combining ≥2 rankings; start with `RRF` (no
   tuning), move to `WeightedSum` only when you have weights to tune.
 
+### [`embed`](embed) — no-LLM in-process embedders (dense) · [godoc](https://pkg.go.dev/github.com/sukitss/thai-nlp-go/search/embed)
+
+Turns text into a `[]float32` you can feed straight to [`vector`](vector) — with
+no model server, GPU, or network, so a RAG stack runs fully offline. `Hashing`
+feature-hashes char n-grams into a fixed-width vector: purely lexical, so it is
+robust to OOV terms and typos (`เนตเวิรค์ช้า` still matches where BM25 returns
+nothing) but semantically blind (`cos(รถ, ยานพาหนะ) ≈ 0`). `Static` loads a
+pre-trained fastText/word2vec `.vec` file for real semantics (`cos(รถ, ยานพาหนะ)
+≈ 0.996`) and **ships no model** — you point it at a file whose license is yours
+to accept. Both satisfy one `Embedder{Embed, Dim}` interface, so you can swap or
+average them.
+
+- **Constructors:** `NewHashing(dim, ngram)`, `LoadStatic(r)` / `LoadStaticFile(path)`.
+- **When:** any dense retrieval without an embedding service. `Hashing` for a
+  zero-dependency lexical fallback; `Static` when you can supply a vector file
+  and need semantic matching. Fuse the sparse and dense hits with [`fusion`](fusion)
+  for the best of both.
+
 ## Design notes
 
+- **⚠️ Analyzer alignment (the silent zero-recall trap):** the terms you *index*
+  and the terms you *query* must fold identically, or matches vanish with no
+  error. Index documents with [`keyword`](keyword)`.Keys` and parse queries with
+  [`query`](query)`.Parse` — both apply the same acronym-aware fold (`IT`≡`it`≡`ไอที`),
+  so they line up by construction. If you tokenize one side by hand, mirror the
+  exact same casing/acronym fold on the other.
+- **Bridging hit lists into fusion:** [`fusion`](fusion)`.Adapt(list, proj)` lifts
+  any `invidx.Hit` / `vector.Hit` slice into `[]fusion.Hit` in one line —
+  `fusion.Adapt(vHits, func(h vector.Hit) fusion.Hit { return fusion.Hit{ID: h.ID, Score: float64(h.Score)} })`.
 - **Deterministic, strict ordering** everywhere: every result is `(score desc, id
   asc)`, so rankings are reproducible and directly comparable across primitives.
 - **Low-alloc hot paths**, pure Go, no cgo/BLAS/ONNX; SIMD-ish work goes through
