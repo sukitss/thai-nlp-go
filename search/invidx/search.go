@@ -49,6 +49,11 @@ func (idx *Index) Prepare(sc weight.CorpusScorer) []float64 {
 // term's query multiplicity (a term repeated in the query is weighted that many
 // times, matching weight.ScoreDoc); ub is weight × the term's precomputed
 // maximum contribution.
+//
+// blkMax/blkSize are set only on the block-max query path ([Index.SearchBlockMax]):
+// blkMax[i] is the maximum RAW (unweighted) contribution over postings block i,
+// so weight × blkMax[pos/blkSize] is a tighter, position-local upper bound than
+// the term-global ub. They are nil/0 on the WAND and brute paths.
 type cursor struct {
 	docs   []uint32
 	tfs    []uint32
@@ -56,6 +61,9 @@ type cursor struct {
 	term   uint32
 	weight float64
 	ub     float64
+
+	blkMax  []float64
+	blkSize int
 }
 
 // doc returns the current document, or sentinel when the cursor is exhausted.

@@ -41,6 +41,7 @@ type Index struct {
 
 	mu      sync.Mutex
 	ubCache map[weight.CorpusScorer][]float64 // scorer → per-term max contribution
+	bmCache map[bmKey]*blockData              // (scorer, blockSize) → per-block max impacts
 }
 
 // N reports the number of documents in the index.
@@ -142,6 +143,7 @@ func (b *Builder) Build() *Index {
 		df:       make([]int, b.numTerms),
 		cf:       make([]int, b.numTerms),
 		ubCache:  map[weight.CorpusScorer][]float64{},
+		bmCache:  map[bmKey]*blockData{},
 	}
 	for t := 0; t < b.numTerms; t++ {
 		p := b.post[t]
