@@ -46,6 +46,14 @@ type HNSW struct {
 	dim   int
 	nodes []hnswNode
 
+	// Representation. Exactly one is used: with no quantizer (sq == nil, the
+	// default) vectors are stored as normalized float32 in vecs and scored by
+	// exact cosine; with a quantizer they are stored as compact codes and scored
+	// by the quantizer's symmetric code-to-code similarity.
+	sq    SymQuantizer
+	vecs  [][]float32 // node index → normalized vector   (sq == nil)
+	codes [][]byte    // node index → quantized code        (sq != nil)
+
 	entry    int32 // internal index of the top-layer entry point
 	maxLevel int
 
@@ -59,13 +67,21 @@ type HNSW struct {
 	rng *rand.Rand
 }
 
-// hnswNode is one corpus vector and its per-layer adjacency. neighbors[l] holds
-// the internal indices of the node's neighbours on layer l; the slice has
-// len(node.level)+1 layers.
+// hnswNode is one corpus vector's id and its per-layer adjacency. neighbors[l]
+// holds the internal indices of the node's neighbours on layer l; the slice has
+// len(node.level)+1 layers. The vector itself lives in HNSW.vecs or HNSW.codes
+// at the same index.
 type hnswNode struct {
-	vec       []float32 // L2-normalized
 	id        uint32    // caller-supplied id
 	neighbors [][]int32 // neighbors[level] = internal indices
+}
+
+// queryRep is a query prepared for one representation: a normalized float32
+// vector (exact path) or a quantized code (quantized path). Built once per query
+// and passed down through searchLayer.
+type queryRep struct {
+	vec  []float32
+	code []byte
 }
 
 // Option configures a [HNSW] at construction.
@@ -89,6 +105,15 @@ func WithEfSearch(ef int) Option { return func(h *HNSW) { h.efSearch = ef } }
 // deterministic. Default 1.
 func WithSeed(seed int64) Option { return func(h *HNSW) { h.rng = rand.New(rand.NewSource(seed)) } }
 
+// WithQuantizer stores the graph over compact codes produced by sq instead of
+// full float32 vectors, trading recall for 4–32× less memory and cheaper
+// distances (e.g. Hamming popcount for [NewBinarySym]). The graph is built AND
+// searched entirely in the code space using sq's symmetric code-to-code
+// similarity, so both build and query see the quantization. Passing nil (the
+// default) keeps the exact float32 representation. sq.Dim() must equal the
+// HNSW's dim.
+func WithQuantizer(sq SymQuantizer) Option { return func(h *HNSW) { h.sq = sq } }
+
 // NewHNSW returns an empty HNSW index for dim-dimensional vectors.
 func NewHNSW(dim int, opts ...Option) *HNSW {
 	h := &HNSW{
@@ -103,6 +128,9 @@ func NewHNSW(dim int, opts ...Option) *HNSW {
 	}
 	if h.m < 1 {
 		h.m = 1
+	}
+	if h.sq != nil && h.sq.Dim() != dim {
+		panic("vector: HNSW quantizer dim mismatch")
 	}
 	h.mmax = h.m
 	h.mmax0 = 2 * h.m
@@ -130,10 +158,18 @@ func (h *HNSW) Add(id uint32, vec []float32) {
 	newIdx := int32(len(h.nodes))
 	level := h.randomLevel()
 	h.nodes = append(h.nodes, hnswNode{
-		vec:       nv,
 		id:        id,
 		neighbors: make([][]int32, level+1),
 	})
+	var qr queryRep
+	if h.sq != nil {
+		code := h.sq.Encode(nv)
+		h.codes = append(h.codes, code)
+		qr = queryRep{code: code}
+	} else {
+		h.vecs = append(h.vecs, nv)
+		qr = queryRep{vec: nv}
+	}
 
 	if newIdx == 0 { // first node becomes the entry point
 		h.entry = 0
@@ -145,13 +181,13 @@ func (h *HNSW) Add(id uint32, vec []float32) {
 	// Greedy descent through the layers above this node's top level: one step
 	// each, moving the entry point closer to the query.
 	for l := h.maxLevel; l > level; l-- {
-		w := h.searchLayer(nv, ep, 1, l)
+		w := h.searchLayer(qr, ep, 1, l)
 		ep = ep[:0]
 		ep = append(ep, w[0].node)
 	}
 	// From this node's top level down to 0: ef-search, pick neighbours, link.
 	for l := min(h.maxLevel, level); l >= 0; l-- {
-		w := h.searchLayer(nv, ep, h.efConstruction, l)
+		w := h.searchLayer(qr, ep, h.efConstruction, l)
 		mmax := h.mmax
 		if l == 0 {
 			mmax = h.mmax0
@@ -179,10 +215,10 @@ func (h *HNSW) TopK(query []float32, k int) []Hit {
 	if k <= 0 || len(h.nodes) == 0 {
 		return nil
 	}
-	q := normalized(query)
+	qr := h.prepareQuery(query)
 	ep := []int32{h.entry}
 	for l := h.maxLevel; l >= 1; l-- {
-		w := h.searchLayer(q, ep, 1, l)
+		w := h.searchLayer(qr, ep, 1, l)
 		ep = ep[:0]
 		ep = append(ep, w[0].node)
 	}
@@ -190,7 +226,7 @@ func (h *HNSW) TopK(query []float32, k int) []Hit {
 	if ef < k {
 		ef = k
 	}
-	w := h.searchLayer(q, ep, ef, 0)
+	w := h.searchLayer(qr, ep, ef, 0)
 	hits := make([]Hit, len(w))
 	for i, c := range w {
 		hits[i] = Hit{ID: c.id, Score: c.sim}
@@ -212,20 +248,38 @@ func (h *HNSW) randomLevel() int {
 	return int(-math.Log(r) * h.mL)
 }
 
-// simIdx is the cosine similarity between a normalized query and stored node.
-func (h *HNSW) simIdx(q []float32, node int32) float32 {
-	return dot(q, h.nodes[node].vec)
+// prepareQuery builds the query representation matching this index: a normalized
+// float32 vector (exact path) or a quantized code (quantized path).
+func (h *HNSW) prepareQuery(query []float32) queryRep {
+	nv := normalized(query)
+	if h.sq != nil {
+		return queryRep{code: h.sq.Encode(nv)}
+	}
+	return queryRep{vec: nv}
 }
 
-// simNodes is the cosine similarity between two stored (normalized) nodes.
+// simQ is the similarity between a prepared query and a stored node: exact cosine
+// for the float32 path, the quantizer's symmetric code similarity otherwise.
+func (h *HNSW) simQ(q queryRep, node int32) float32 {
+	if h.sq != nil {
+		return h.sq.SimCodes(q.code, h.codes[node])
+	}
+	return dot(q.vec, h.vecs[node])
+}
+
+// simNodes is the similarity between two stored nodes, in whichever
+// representation the index uses.
 func (h *HNSW) simNodes(a, b int32) float32 {
-	return dot(h.nodes[a].vec, h.nodes[b].vec)
+	if h.sq != nil {
+		return h.sq.SimCodes(h.codes[a], h.codes[b])
+	}
+	return dot(h.vecs[a], h.vecs[b])
 }
 
 // searchLayer runs the HNSW greedy best-first search on one layer: starting from
 // entry, it expands the ef most promising nodes and returns the ef nearest found
-// (as an unordered slice). q must be normalized.
-func (h *HNSW) searchLayer(q []float32, entry []int32, ef, level int) []cand {
+// (as an unordered slice). q is the prepared query for the index's representation.
+func (h *HNSW) searchLayer(q queryRep, entry []int32, ef, level int) []cand {
 	vs := visitedPool.Get().(*visitedSet)
 	vs.reset(len(h.nodes))
 	defer visitedPool.Put(vs)
@@ -234,7 +288,7 @@ func (h *HNSW) searchLayer(q []float32, entry []int32, ef, level int) []cand {
 	w := candHeap{lt: func(x, y cand) bool { return candBetter(y, x) }} // top = worst (min sim)
 
 	for _, e := range entry {
-		c := cand{node: e, id: h.nodes[e].id, sim: h.simIdx(q, e)}
+		c := cand{node: e, id: h.nodes[e].id, sim: h.simQ(q, e)}
 		vs.add(e)
 		candidates.push(c)
 		w.push(c)
@@ -250,7 +304,7 @@ func (h *HNSW) searchLayer(q []float32, entry []int32, ef, level int) []cand {
 				continue
 			}
 			vs.add(nb)
-			nc := cand{node: nb, id: h.nodes[nb].id, sim: h.simIdx(q, nb)}
+			nc := cand{node: nb, id: h.nodes[nb].id, sim: h.simQ(q, nb)}
 			if w.len() < ef || nc.sim > w.top().sim {
 				candidates.push(nc)
 				w.push(nc)
