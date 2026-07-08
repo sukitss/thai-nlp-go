@@ -122,12 +122,10 @@ func normalized(v []float32) []float32 {
 	return out
 }
 
-// dot returns the dot product of two equal-length float32 vectors, accumulated
-// in float32 (the hot path — callers that need precision normalize first).
-func dot(a, b []float32) float32 {
-	var s float32
-	for i := range a {
-		s += a[i] * b[i]
-	}
-	return s
-}
+// dot returns the dot product of two equal-length float32 vectors (the hot path
+// behind HNSW's float32 distances and the PQ query table). It is defined per
+// build tag: an AVX2 kernel on amd64, the portable loop elsewhere — see
+// dotf32*.go. Both accumulate in float32; callers that need precision normalize
+// first. The AVX2 path sums in eight parallel lanes, so its result can differ
+// from a strict left-to-right sum by a few ULP — irrelevant to ranking, but the
+// reason exactness tests keep their own sequential reference.

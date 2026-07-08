@@ -31,12 +31,24 @@ func randVecs(n, dim, clusters int, seed int64) [][]float32 {
 	return out
 }
 
+// seqDot is a strict left-to-right float32 dot product — the reference
+// summation order, matching float32Scorer.Score. exactTopK uses this rather than
+// the package dot (which on AVX2 sums in parallel lanes) so the exactness tests
+// compare like-for-like against Flat+Float32 regardless of the SIMD path.
+func seqDot(a, b []float32) float32 {
+	var s float32
+	for i := range a {
+		s += a[i] * b[i]
+	}
+	return s
+}
+
 // exactTopK is a naive O(n*d) cosine reference: the ground truth.
 func exactTopK(vecs [][]float32, ids []uint32, query []float32, k int) []Hit {
 	nq := normalized(query)
 	hits := make([]Hit, len(vecs))
 	for i, v := range vecs {
-		hits[i] = Hit{ID: ids[i], Score: dot(nq, normalized(v))}
+		hits[i] = Hit{ID: ids[i], Score: seqDot(nq, normalized(v))}
 	}
 	sort.Slice(hits, func(i, j int) bool { return betterHit(hits[i], hits[j]) })
 	if k > len(hits) {
