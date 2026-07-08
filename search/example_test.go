@@ -103,3 +103,53 @@ func Example() {
 	// query terms: [เบอร์ ปลา IT ไอที เทคโนโลยีสารสนเทศ]
 	// top hit: [0] เบอร์โทรของปลา IT คือ 081-234-5678 ติดต่อได้ในเวลาทำการ
 }
+
+// ExampleHNSW shows the dense matcher's two scaling knobs on the same corpus: the
+// approximate graph index HNSW (sub-linear TopK) and, on top of it, quantization
+// via WithQuantizer to shrink the graph. It contrasts three ways to find the same
+// nearest document:
+//
+//   - Flat + Float32  — exact, the baseline every approximate result is judged against
+//   - HNSW  (float32) — approximate graph, here matching the exact top-1
+//   - HNSW  + BinarySym — a 32×-smaller graph over binary codes; coarse on its own,
+//     so its candidates are re-ranked exactly with Flat.Rescore (the two-stage
+//     pattern you use at scale: cheap graph narrows, exact scorer decides)
+func ExampleHNSW() {
+	docs := []string{
+		"เบอร์โทรของปลา IT คือ 081-234-5678 ติดต่อได้ในเวลาทำการ",
+		"วิธีรีเซ็ตรหัสผ่าน wifi ของบริษัทสำหรับพนักงานใหม่",
+		"การลาพักร้อนต้องแจ้งล่วงหน้ากี่วันและใครเป็นผู้อนุมัติ",
+		"ติดต่อฝ่าย HR เรื่องเงินเดือนและสวัสดิการพนักงาน",
+	}
+
+	exact := vector.NewFlat(vector.NewFloat32(embedDim))  // exact baseline
+	graph := vector.NewHNSW(embedDim, vector.WithSeed(1)) // approximate, float32
+	small := vector.NewHNSW(embedDim, vector.WithSeed(1), // approximate, 32× smaller
+		vector.WithQuantizer(vector.NewBinarySym(embedDim)))
+	for i, d := range docs {
+		v := embed(keyword.Keys(d))
+		exact.Add(uint32(i), v)
+		graph.Add(uint32(i), v)
+		small.Add(uint32(i), v)
+	}
+
+	q := embed(keyword.Keys("เบอร์ ปลา IT"))
+	want := exact.TopK(q, 1)[0].ID
+
+	// Binary graph is coarse: pull a few candidates, then rescore them exactly.
+	coarse := small.TopK(q, 3)
+	ids := make([]uint32, len(coarse))
+	for i, h := range coarse {
+		ids[i] = h.ID
+	}
+	reranked := exact.Rescore(q, ids, 1)[0].ID
+
+	fmt.Printf("float32 HNSW == exact: %v\n", graph.TopK(q, 1)[0].ID == want)
+	fmt.Printf("binary HNSW + rescore == exact: %v\n", reranked == want)
+	fmt.Printf("answer: %s\n", docs[want])
+
+	// Output:
+	// float32 HNSW == exact: true
+	// binary HNSW + rescore == exact: true
+	// answer: เบอร์โทรของปลา IT คือ 081-234-5678 ติดต่อได้ในเวลาทำการ
+}

@@ -123,33 +123,70 @@ al. 2003) uses per-term max-score upper bounds to skip documents that provably
 cannot enter the top-k, and returns the **identical** top-k as the full-scan
 `SearchBrute` oracle — same ids, bit-identical scores, same order. It computes
 the corpus statistics (df, cf, lengths) itself, so any `weight.CorpusScorer`
-scores directly against it.
+scores directly against it. `SearchBlockMax` (Block-Max WAND, Ding & Suel 2011)
+adds per-block max impacts for tighter, position-local bounds — same exact top-k,
+prunes strictly more.
 
 - **Constructors:** `NewBuilder()` → `Add(docID, terms, tfs)` → `Build()` →
-  `Index`; `Index.Search(query, scorer, k)`; `Count(tokenIDs)` derives
-  terms/tfs; `Prepare(scorer)` warms the upper-bound cache.
+  `Index`; `Index.Search(query, scorer, k)` (WAND) or `SearchBlockMax` (BMW);
+  `Count(tokenIDs)` derives terms/tfs; `Prepare(scorer)` warms the upper-bound
+  cache.
 - **When:** the sparse side of retrieval over a `vocab`-mapped corpus, once it is
-  big enough that skipping pays (WAND needs something to skip).
+  big enough that skipping pays. **Use `Search` (WAND) by default**; reach for
+  `SearchBlockMax` only at web-scale / large k, where its extra pruning outweighs
+  its per-round block lookup.
 - **Measured:** on real Thai Wikipedia (**86,689 docs / 113,752 terms**) WAND is
   **1.7–6.4× faster** than brute (pruning 52–94% of candidates), matching the
-  2–10× the literature reports; longer queries win more, larger k wins less.
+  2–10× the literature reports; longer queries win more, larger k wins less. BMW
+  prunes *more* than WAND at every setting but is net **slower** here (0.64–0.91×
+  for |q|≥3): at ~86k WAND is already near-optimal, so the block lookup out-costs
+  the extra skip — BMW's win is a large-corpus / large-k regime.
 
 ### [`vector`](vector) — dense-vector matching + quantization · [godoc](https://pkg.go.dev/github.com/sukitss/thai-nlp-go/search/vector)
 
 In-memory nearest-neighbour matching over embedding vectors, CPU-only, no vector
-DB. A `Quantizer` trades memory for accuracy (`Float32` exact, `Binary` 32×
-smaller, `Scalar8` 4× smaller, `PQ` tunable); `Flat` brute-scans the codes
-(`TopKParallel` shards across cores, byte-identical to serial), and `Rescore`
-re-ranks a coarse candidate set with an exact scorer — the two-stage pattern.
+DB. Two matchers share one `Matcher` interface (`Add` + `TopK`):
+
+- **`Flat`** brute-scans every vector — **exact** with `Float32` by construction.
+  `TopKParallel` shards across cores (byte-identical to serial), and `Rescore`
+  re-ranks a coarse candidate set with an exact scorer (the two-stage pattern). A
+  `Quantizer` trades memory for accuracy on the stored codes: `Float32` (exact),
+  `Binary` (32× smaller, Hamming), `Scalar8` (4×), `PQ` (tunable, asymmetric ADC).
+- **`HNSW`** is an approximate graph index whose `TopK` is **sub-linear** in the
+  corpus size — it walks a navigable subgraph instead of scanning everything, so
+  it pulls ahead of `Flat` as N grows. `efSearch` is the recall/latency knob.
+  `WithQuantizer(NewBinarySym | NewScalar8Sym)` stores the graph over compact
+  codes (built *and* searched in the code space) for 4–32× less memory and far
+  cheaper build; `Float32` stays the default.
+
+**Which matcher / quantizer:**
+
+| corpus & goal | use |
+|---|---|
+| ≤ ~100k, exact ground truth | `Flat` + `Float32` |
+| near-exact, 4× less RAM | `Scalar8` (on `Flat`, or `HNSW`+`WithQuantizer(NewScalar8Sym)`) |
+| ≥ ~1M, sub-linear latency | `HNSW` (float32) |
+| ≥ ~1M, RAM-bound / fast build | `HNSW`+`WithQuantizer(NewBinarySym)` → then `Flat.Rescore(Float32)` to recover the tail |
 
 - **Constructors:** `NewFlat(NewFloat32(dim) | NewScalar8(dim) | NewBinary(dim) |
-  TrainPQ(...))`; `Flat.TopK(query, k)`, `Flat.Rescore(query, ids, k)`.
-- **When:** the dense side of hybrid retrieval, or standalone semantic match, up
-  to ~1M vectors in RAM (beyond that, coarse+rerank or a future graph index).
-- **Measured (real BGE-m3):** **scalar8 recall@10 ≈ 0.99** at 4× compression and
-  same/faster latency — the drop-in near-exact default. `binary` alone loses the
-  tail (recall@10 ≈ 0.68) but scans ~26× faster at 32× smaller; **binary coarse →
-  Float32 rerank (N≈100) restores recall@10 to 0.989** (N=500 → 1.000).
+  TrainPQ(...))` with `Flat.TopK / Rescore / TopKParallel`; `NewHNSW(dim,
+  WithEfSearch(n), WithQuantizer(NewBinarySym(dim) | NewScalar8Sym(dim)), WithM,
+  WithEfConstruction, WithSeed)` with `HNSW.TopK / SetEfSearch`.
+- **When:** the dense side of hybrid retrieval, or standalone semantic match —
+  `Flat` for exact/small, `HNSW` once N is large enough that scanning everything
+  hurts, quantized when memory or build/query throughput dominates.
+- **Measured (real BGE-m3):**
+  - `Flat`+`Scalar8`: **recall@10 ≈ 0.99** at 4× compression, same/faster
+    latency — the near-exact default. `Binary` alone loses the tail (≈0.68) but
+    scans ~26× faster at 32× smaller; **binary coarse → Float32 rerank (N≈100)
+    restores recall@10 to 0.989** (N=500 → 1.000).
+  - `HNSW` (float32): **recall@10 0.998–1.000**; at efSearch=10 on 7.5k vectors
+    **23× faster than `Flat` single-core** (recall@10 0.998), and query latency
+    stays sub-linear as N grows while `Flat` grows linear.
+  - `HNSW`+`WithQuantizer(NewBinarySym)`: **builds 9–11× faster** (Hamming
+    popcount ≫ float dot) at **32× less memory**, queries 8–12× faster, recall@10
+    ≈ 0.67 — pair with `Flat.Rescore` to recover ~0.99. `NewScalar8Sym` keeps
+    recall@10 ≈ 0.988 at 4× smaller.
 
 ### [`sketch`](sketch) — MinHash / SimHash / count-min · [godoc](https://pkg.go.dev/github.com/sukitss/thai-nlp-go/search/sketch)
 
