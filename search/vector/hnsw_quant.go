@@ -111,10 +111,9 @@ func (s *Scalar8Sym) Encode(vec []float32) []byte {
 func (s *Scalar8Sym) SimCodes(a, b []byte) float32 {
 	sa := math.Float32frombits(binary.LittleEndian.Uint32(a))
 	sb := math.Float32frombits(binary.LittleEndian.Uint32(b))
-	var d int32
-	for i := 0; i < s.dim; i++ {
-		d += int32(int8(a[4+i])) * int32(int8(b[4+i]))
-	}
+	// The int8 payload follows the 4-byte scale. dotInt8 uses an AVX2 kernel when
+	// available and the portable loop otherwise (see dotint8*.go).
+	d := dotInt8(a[4:4+s.dim], b[4:4+s.dim])
 	return sa * sb * float32(d)
 }
 
