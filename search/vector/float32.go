@@ -49,10 +49,8 @@ func (q *Float32) Query(query []float32) Scorer {
 
 type float32Scorer struct{ q []float32 }
 
+// Score dots the query against the stored float32 code. dotF32Bytes reinterprets
+// the little-endian code as float32 and uses the AVX2 dot kernel on amd64.
 func (s *float32Scorer) Score(code []byte) float32 {
-	var sum float32
-	for i, x := range s.q {
-		sum += x * math.Float32frombits(binary.LittleEndian.Uint32(code[i*4:]))
-	}
-	return sum
+	return dotF32Bytes(s.q, code)
 }

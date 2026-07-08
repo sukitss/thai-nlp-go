@@ -87,11 +87,8 @@ type scalar8Scorer struct {
 func (s *scalar8Scorer) Score(code []byte) float32 {
 	min := math.Float32frombits(binary.LittleEndian.Uint32(code[0:]))
 	scale := math.Float32frombits(binary.LittleEndian.Uint32(code[4:]))
-	bytes := code[8:]
-	// dot(q, min + scale*byte) = min*sum(q) + scale*sum(q[i]*byte[i])
-	var acc float32
-	for i, x := range s.q {
-		acc += x * float32(bytes[i])
-	}
+	// dot(q, min + scale*byte) = min*sum(q) + scale*sum(q[i]*byte[i]); the second
+	// sum is a float32-times-unsigned-byte dot with an AVX2 kernel on amd64.
+	acc := dotF32U8(s.q, code[8:8+len(s.q)])
 	return min*s.qsum + scale*acc
 }
