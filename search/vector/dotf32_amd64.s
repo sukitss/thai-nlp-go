@@ -32,3 +32,62 @@ loop:
 	VMOVSS  X0, ret+24(FP)
 	VZEROUPPER
 	RET
+
+// func dotFloat32FMA(a, b *float32, n int) float32
+//
+// Fuses multiply and add into VFMADD231PS. FMA has higher latency than a bare
+// VADDPS, so a single accumulator would be latency-bound and slower than the
+// AVX2 kernel; four independent accumulators (32 floats/iteration) hide that
+// latency. Precondition: n is a positive multiple of 8.
+TEXT ·dotFloat32FMA(SB), NOSPLIT, $0-28
+	MOVQ a+0(FP), AX
+	MOVQ b+8(FP), BX
+	MOVQ n+16(FP), CX
+	VXORPS Y0, Y0, Y0
+	VXORPS Y2, Y2, Y2
+	VXORPS Y3, Y3, Y3
+	VXORPS Y4, Y4, Y4
+
+	MOVQ CX, DX
+	SHRQ $5, DX          // DX = n / 32 (4-accumulator main loop)
+	JZ   fmatail
+
+fmamain:
+	VMOVUPS (AX), Y1
+	VFMADD231PS (BX), Y1, Y0
+	VMOVUPS 32(AX), Y5
+	VFMADD231PS 32(BX), Y5, Y2
+	VMOVUPS 64(AX), Y1
+	VFMADD231PS 64(BX), Y1, Y3
+	VMOVUPS 96(AX), Y5
+	VFMADD231PS 96(BX), Y5, Y4
+	ADDQ $128, AX
+	ADDQ $128, BX
+	DECQ DX
+	JNZ  fmamain
+
+	VADDPS Y2, Y0, Y0
+	VADDPS Y4, Y3, Y3
+	VADDPS Y3, Y0, Y0
+
+fmatail:
+	ANDQ $31, CX         // CX = n % 32
+	SHRQ $3, CX          // remaining 8-blocks
+	JZ   fmareduce
+
+fmatailloop:
+	VMOVUPS (AX), Y1
+	VFMADD231PS (BX), Y1, Y0
+	ADDQ $32, AX
+	ADDQ $32, BX
+	DECQ CX
+	JNZ  fmatailloop
+
+fmareduce:
+	VEXTRACTF128 $1, Y0, X1
+	VADDPS  X1, X0, X0
+	VHADDPS X0, X0, X0
+	VHADDPS X0, X0, X0
+	VMOVSS  X0, ret+24(FP)
+	VZEROUPPER
+	RET
