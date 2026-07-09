@@ -41,7 +41,7 @@ func engines() []struct {
 	fn   func(string) []string
 } {
 	crf.Split("warm")       // warm default model + tokenizer
-	crf.Novel().Split("warm")
+	crf.Dialogue().Split("warm")
 	charseg.Split("warm")
 	return []struct {
 		name string
@@ -50,7 +50,7 @@ func engines() []struct {
 		{"whitespace", sentence.Split},
 		{"heuristic", sentence.SplitHeuristic},
 		{"crf.Default", crf.Split},
-		{"crf.Novel", func(s string) []string { return crf.Novel().Split(s) }},
+		{"crf.Dialogue", func(s string) []string { return crf.Dialogue().Split(s) }},
 		{"charseg", charseg.Split},
 	}
 }

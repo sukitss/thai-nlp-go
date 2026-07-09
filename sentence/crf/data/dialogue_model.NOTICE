@@ -1,29 +1,29 @@
-novel_model.tsv — provenance and licensing
-===========================================
+dialogue_model.tsv — provenance and licensing
+==============================================
 
 What it is
 ----------
 A linear-chain CRF sentence-segmentation model (same format/features as the
-crfcut model) retrained for the NOVEL domain: translated Chinese/Japanese and
-Thai web novels. The default crfcut model is trained on TED subtitles and
-generalises poorly to novel prose; this model is the in-domain replacement.
+crfcut model) retrained for dialogue- and quote-heavy prose (conversational
+text, quoted speech). The default crfcut model is trained on TED subtitles and
+generalises poorly to this register; this model is the in-domain replacement.
 
 How it was made (recipe)
 ------------------------
 Weak supervision (self-labelled silver corpus), no external gold corpus:
 
-  1. Source text: Thai novel chapters from our own novel platform (TNV1 /
-     thai-novel.com) — text we own. No third-party corpus is used.
-  2. Silver labelling (cmd/crftrain, -novel mode): tokenize with the default
-     segmenter (whitespace kept) and mark a sentence boundary ('E') using only
-     ORTHOGRAPHIC signals that are high-precision in this domain:
+  1. Source text: text we own (used with permission). No third-party corpus is
+     used.
+  2. Silver labelling (cmd/crftrain): tokenize with the default segmenter
+     (whitespace kept) and mark a sentence boundary ('E') using only
+     ORTHOGRAPHIC signals that are high-precision in this register:
        - a token ending in a closing quote (” " » 」 』 ’) or terminal
          punctuation (. ! ? … 。 ！ ？), and
        - the token immediately before an opening dialogue quote (“ « 「 『 „).
-     Bare inter-word spaces are treated as NON-boundaries (in Thai novels they
-     are mostly intra-sentence clause separators — the ambiguity the CRF
-     resolves). The labelling is independent of the CRF's own lexical features,
-     so the before/after comparison is not circular.
+     Bare inter-word spaces are treated as NON-boundaries (in dialogue-heavy
+     Thai prose they are mostly intra-sentence clause separators — the ambiguity
+     the CRF resolves). The labelling is independent of the CRF's own lexical
+     features, so the before/after comparison is not circular.
   3. Train: averaged structured perceptron (crf.Train), 12 iterations.
 
 Measured quality (held-out silver)
@@ -42,10 +42,10 @@ line breaks (a strong extra boundary signal) and retrain.
 
 Licensing
 ---------
-Derived from novel text we own via self weak-supervision. The model stores
-aggregate CRF feature weights over short (≤3) word n-grams — statistical
-parameters, not reconstructable prose — analogous to the upstream crfcut model.
-Shippable under the project licence.
+Derived from text we own via self weak-supervision. The model stores aggregate
+CRF feature weights over short (≤3) word n-grams — statistical parameters, not
+reconstructable prose — analogous to the upstream crfcut model. Shippable under
+the project licence.
 
 Note on LST20: the LST20 Thai treebank (NECTEC/AIForThai) has explicit sentence
 and clause boundaries and is often cited as CC BY 3.0, but its official

@@ -99,9 +99,9 @@ func isThaiConsonant(r rune) bool { return r >= 0x0E01 && r <= 0x0E2E }
 
 // Sentence-final particle cues (token-final signals that a candidate space is a
 // sentence boundary). Curated by register — modern colloquial, question,
-// emotive, classical/royal-court, Chinese- and Japanese-translated web-novel,
+// emotive, classical/royal-court, Chinese- and Japanese-translated prose,
 // poetic, and archaic-formal — covering both the eval registers and the
-// production novel domains. These are END-of-sentence signals only; forms of
+// dialogue-heavy production registers. These are END-of-sentence signals only; forms of
 // address / pronouns that open or sit mid-sentence are excluded (see the data
 // file header). A token whose stripped form ENDS WITH one of these fires a
 // hashed feature whose weight the perceptron LEARNS (not a hard cut), so

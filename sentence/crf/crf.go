@@ -37,8 +37,8 @@ const (
 //go:embed data/crfcut_model.tsv
 var modelData string
 
-//go:embed data/novel_model.tsv
-var novelModelData string
+//go:embed data/dialogue_model.tsv
+var dialogueModelData string
 
 //go:embed data/crfcut_enders.txt
 var endersData string
@@ -153,29 +153,29 @@ func Default() *Model {
 }
 
 var (
-	novelOnce  sync.Once
-	novelModel *Model
+	dialogueOnce  sync.Once
+	dialogueModel *Model
 )
 
-// Novel returns a CRF sentence segmenter retrained for the novel domain
-// (translated Chinese/Japanese and Thai web novels), where the default
-// crfcut model — trained on TED subtitles — generalises poorly. It was fit
-// with an averaged perceptron on a silver corpus auto-labelled from the
-// orthography of novel text (dialogue quotation marks and terminal
-// punctuation as high-precision sentence-boundary signals). On held-out
-// novel text it reaches boundary-F1 ~0.97 versus ~0.63 for the crfcut
-// default. See NOTICE for provenance and licensing.
-func Novel() *Model {
+// Dialogue returns a CRF sentence segmenter retrained for dialogue- and quote-
+// heavy prose (conversational text, quoted speech), where the default crfcut
+// model — trained on TED subtitles — generalises poorly. It was fit with an
+// averaged perceptron on a silver corpus auto-labelled from the orthography of
+// such text (dialogue quotation marks and terminal punctuation as high-precision
+// sentence-boundary signals). On held-out dialogue-heavy text it reaches
+// boundary-F1 ~0.97 versus ~0.63 for the crfcut default. See NOTICE for
+// provenance and licensing.
+func Dialogue() *Model {
 	load() // enders/starters/segmenter shared with the default model
-	novelOnce.Do(func() {
-		m, err := LoadModel(strings.NewReader(novelModelData))
+	dialogueOnce.Do(func() {
+		m, err := LoadModel(strings.NewReader(dialogueModelData))
 		if err != nil {
-			panic("crf: embedded novel model: " + err.Error())
+			panic("crf: embedded dialogue model: " + err.Error())
 		}
 		m.buildHashIndex()
-		novelModel = m
+		dialogueModel = m
 	})
-	return novelModel
+	return dialogueModel
 }
 
 func parseSet(data string) map[string]bool {

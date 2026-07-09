@@ -62,8 +62,8 @@ TRAINING DATA — every source is own / CC0 / PD / MIT / CC-BY (NO NC/ND/SA)
    Improves academic/formal-news and UD scores. Provided as
    data/incoming/literature.jsonl.
 
-5. Own novel-platform text (thai-novel.com) — dialogue/quote silver.
-   License: OWN PLATFORM (used with permission; our data).
+5. Our own text, used with permission — dialogue/quote silver.
+   License: OWN (used with permission; our data).
    Use    : char-level orthographic silver (closing quote / terminal punct /
             before opening quote). Weight 0.05 (low — its silver is negative-
             heavy; higher weights depress recall).
@@ -81,7 +81,7 @@ FINAL TRAINING MIX (after dedup + per-source weighting)
   wisesight (CC0)       2,670    0.15
   tlc (MIT)                60    0.04
   wikisource (PD)          18    0.04
-  own-novel (OWN)       2,721    0.05
+  own-text (OWN)        2,721    0.05
   (sibling full-doc thaigov: 10,000 docs -> weight 0.00, excluded: under-split)
   Dedup removed: 208 exact + 4 near-duplicate docs.
   Effective training set: 23,493 documents, 4,187,279 runes, 118,356 boundaries.
@@ -92,7 +92,7 @@ NO TEST LEAKAGE (proof: leak check over all training sources)
   1,490 eval gold sentences (>=10 chars, whitespace-normalised) checked against
   every training source:
     - Tatoeba raw:            0 exact overlaps
-    - own-novel:              0 exact; 1 incidental short-phrase substring
+    - own-text:               0 exact; 1 incidental short-phrase substring
     - cc0_gov_social:         0 exact; 2 incidental short-phrase substrings
   The 3 substrings are generic 13-16-char phrases ("who are they", "faculty of
   economics", "optimism") appearing mid-sentence in unrelated training docs —
@@ -123,7 +123,7 @@ MEASURED QUALITY (boundary-F1 + literature space-correct acc)
 
   per-dataset boundary-F1 (charseg.Default vs crf.Default):
     HANDGOLD-prose 0.450  WIN (vs crf 0.397)   formal_news 0.895 WIN (vs 0.800)
-    social_chat    0.800  WIN (vs 0.625)        novel_dialogue 0.755 WIN (vs 0.622)
+    social_chat    0.800  WIN (vs 0.625)        dialogue       0.755 WIN (vs 0.622)
     poetry_lyrics  0.529  WIN (crf collapses to 0.000)
     tricky_tokens  0.628  WIN (vs 0.520)  <- abbreviation/date cases
     T117-tatoeba-gold(synth) 0.910  ~tie (vs crf 0.921)
@@ -155,7 +155,7 @@ Update (v0.16.2): retrained with additional discriminative boundary features —
 character-class pairs across the candidate, an abbreviation-dot pattern
 (suppresses false cuts on พ.ศ./ด.ช./น.ส.), sentence-opener cues, and a curated
 sentence-final particle list spanning modern / question / emotive / classical-
-royal / Chinese- & Japanese-translated-novel / poetic / archaic registers
+royal / Chinese- & Japanese-translated prose / poetic / archaic registers
 (data/final_particles.txt). All are learned-weight features (no hard cuts).
-Same permissive training data; lifts the low-prior / verse / novel registers
+Same permissive training data; lifts the low-prior / verse / dialogue registers
 with no regression on the rest.

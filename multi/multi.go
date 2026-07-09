@@ -1,5 +1,5 @@
 // Package multi is the one-call multilingual entry point: give it mixed-language
-// text (a translated novel mixing Thai, Chinese, Japanese, Korean and English,
+// text (a translated passage mixing Thai, Chinese, Japanese, Korean and English,
 // say) and it detects each run's language, routes it to the right tokenizer, and
 // returns index-ready tokens — so callers don't reimplement script routing.
 //

@@ -21,11 +21,11 @@
 # classical / royal court
 เพคะ พ่ะย่ะค่ะ พระพุทธเจ้าข้า พระเจ้าข้า เจ้าค่ะ เจ้าขา ขอรับ ขอรับกระผม มิได้ ดอก แล นะเจ้าคะ
 
-# chinese-translated novel (wuxia / xianxia)
+# chinese-translated prose (wuxia / xianxia register)
 เสียแล้ว เสียจริง เสียนี่ นั่นเอง นี่เอง เท่านั้น เท่านั้นเอง ก็เป็นได้ ก็แล้วกัน มิใช่หรือ
 เช่นนั้นหรือ กระนั้น ยิ่งนัก นักแล กระมัง เจียว หนา นั่นเทียว หามิได้ ก็หาไม่ นั่นแล
 
-# japanese-translated novel
+# japanese-translated prose
 สินะ ล่ะนะ ด้วยล่ะ นั่นล่ะ งั้นหรือ นั่นสินะ ล่ะสิ
 
 # poetic / verse-final (คำสร้อย)

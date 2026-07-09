@@ -2,7 +2,7 @@ package translit
 
 import "strings"
 
-// Cross-lingual name matching: a translated Chinese novel spells a character's
+// Cross-lingual name matching: a translated Chinese text spells a character's
 // name three ways — the Hanzi (聂力), the pinyin ("Nie Li"), and a Thai
 // transliteration (เนี่ยหลี่). PinyinToThai turns a romanized (pinyin) name into
 // an approximate Thai spelling so it lands in the same SoundIndex phonetic
@@ -11,7 +11,7 @@ import "strings"
 // corpus (see the package tests for the coverage that is verified).
 //
 // Japanese romaji is a separate table (a follow-up); this covers Mandarin
-// pinyin, the dominant case for translated-novel character names.
+// pinyin, the dominant case for translated character names.
 
 // pinyin initials → Thai consonant.
 var pinyinInitials = map[string]string{

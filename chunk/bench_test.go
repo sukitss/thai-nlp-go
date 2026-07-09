@@ -9,7 +9,7 @@ import (
 const benchTargetBytes = 1 << 20
 
 // BenchmarkSplit chunks ~1 MB of real Thai corpus text (one paragraph per
-// line, novel-style) with the default rune Measure and built-in splitter.
+// line, prose-style) with the default rune Measure and built-in splitter.
 func BenchmarkSplit(b *testing.B) {
 	data, err := os.ReadFile("../sentence/crf/testdata/crfcut.txt")
 	if err != nil {

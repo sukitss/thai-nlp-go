@@ -1,0 +1,69 @@
+charseg_model_formal.tsv — provenance, licensing, and measured quality
+======================================================================
+Artifact:  sentence/charseg/data/charseg_model_formal.tsv  (hashed averaged-
+           perceptron char-level Thai sentence-boundary classifier)
+Loader:    sentence/charseg/formal.go  -> charseg.Formal() / charseg.FormalSplit
+Built:     2026-07-09
+
+WHAT IT IS
+----------
+A formal-register specialist for the char-level sentence segmenter, produced by
+knowledge distillation: a neural teacher labels permissive Thai text, and our
+own char-level averaged-perceptron student is trained to reproduce those
+boundaries. The student ships; the teacher does not. The char-level engine,
+feature hashing, trainer and candidate definition (sentence/charseg/*.go) are
+our own original code — only the weights here are trained from the teacher's
+labels.
+
+TEACHER
+-------
+SaT ("Segment any Text") model "sat-12l-sm" from the wtpsplit library.
+  License: MIT (code and weights).
+  Copyright (c) 2024 Benjamin Minixhofer, Markus Frohmann, Igor Sterner.
+  Source : https://github.com/segment-any-text/wtpsplit
+The teacher is used offline only, to label training text. Distillation transfers
+the teacher's segmentation FUNCTION, not its training data; the resulting student
+weights are safe to redistribute under a permissive license. With thanks to the
+wtpsplit authors.
+
+TRAINING TEXT (labelled by the teacher; all Public Domain / CC0)
+----------------------------------------------------------------
+  - thaigov-v2 government news  — Public Domain  (9,763 docs)
+  - Wisesight social-media text — CC0-1.0         (2,670 docs)
+  Total 12,433 documents, ~27.8M characters; the teacher produced 149,432 silver
+  sentence boundaries. No NC / ND / ShareAlike text is used.
+
+NO TEST LEAKAGE (proof)
+-----------------------
+Checked every evaluation gold document against the silver training set:
+  - gold documents appearing verbatim in silver : 0 / 176
+  - gold sentences (>=20 chars) appearing verbatim : 1 (an incidental short
+    phrase, not a document/label match)
+  - silver documents unique : 12,433 / 12,433
+So the measured numbers below are not inflated by leakage.
+
+MEASURED QUALITY (same-arena boundary-F1 over 8 registers)
+----------------------------------------------------------
+Selection of the operating point (FormalTau = -26) is honest: leave-one-register-
+out cross-validation chose the SAME tau on every fold, and the held-out (LODO)
+macro equals the in-sample macro, so it generalizes rather than overfits.
+
+  engine                          macro-bF1
+  charseg.Formal (this, tau -26)    0.756   <- honest LODO macro
+  charseg.Default (recall-lean)     0.732
+  whitespace baseline               0.705
+
+  per-register (Formal vs Default):
+    academic_legal 0.864 (+0.073)   formal_news    1.000 (+0.050)
+    handgold_prose 0.425 (+0.098)   tricky_tokens  0.645 (+0.055)
+    poetry_lyrics  0.649 (+0.044)   tatoeba_synth  0.929 (-0.011)
+    dialogue       0.679 (-0.045)   social_chat    0.857 (-0.073)
+
+HONEST SUMMARY
+--------------
+Formal edges Default on the equal-per-register macro (+0.024) and is clearly
+stronger on formal / academic / news / abbreviation text, at the cost of over-
+segmenting informal dialogue and chat. It is offered as an opt-in specialist, not
+as the default: for dialogue-heavy text, Default() (recommended) or Dialogue()
+remain the better choice. Trainer: averaged perceptron, 20-bit hashed weights,
+10 iterations.

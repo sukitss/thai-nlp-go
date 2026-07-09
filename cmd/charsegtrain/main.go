@@ -1,11 +1,11 @@
 // Command charsegtrain trains the character-level sentence segmenter
-// (sentence/charseg) on novel-domain silver data, saves the embedded model, and
-// prints a head-to-head quality comparison (boundary-F1 + space-correct) against
-// the baselines on UD_Thai-PUD and a held-out novel silver set.
+// (sentence/charseg) on dialogue-register silver data, saves the embedded model,
+// and prints a head-to-head quality comparison (boundary-F1 + space-correct)
+// against the baselines on UD_Thai-PUD and a held-out dialogue silver set.
 //
 // Usage:
 //
-//	charsegtrain -novel a.csv,b.csv [-eval extra.csv] [-pud th_pud.conllu] \
+//	charsegtrain -dialogue a.csv,b.csv [-eval extra.csv] [-pud th_pud.conllu] \
 //	    [-bits 20] [-iters 12] [-holdout 0.15] [-out model.tsv]
 package main
 
@@ -31,7 +31,7 @@ func must(err error) {
 	}
 }
 
-// --- silver labelling (orthographic; same rules as crf novel weak-supervision) ---
+// --- silver labelling (orthographic; same rules as crf dialogue weak-supervision) ---
 
 var closingSuffixes = []string{"”", "\"", "»", "」", "』", "’", ".", "!", "?", "…", "。", "！", "？"}
 var openingPrefixes = []string{"“", "«", "「", "『", "„"}
@@ -98,8 +98,8 @@ func silverSentences(seg *tokenize.Segmenter, line string) []string {
 	return out
 }
 
-// readNovel returns silver sentences grouped per source line (a "document").
-func readNovel(seg *tokenize.Segmenter, paths, col string) [][]string {
+// readDialogue returns silver sentences grouped per source line (a "document").
+func readDialogue(seg *tokenize.Segmenter, paths, col string) [][]string {
 	var docs [][]string
 	for _, p := range strings.Split(paths, ",") {
 		p = strings.TrimSpace(p)
@@ -140,7 +140,7 @@ func readNovel(seg *tokenize.Segmenter, paths, col string) [][]string {
 			}
 		}
 		f.Close()
-		fmt.Printf("novel: %d docs from %s\n", nline, p)
+		fmt.Printf("dialogue: %d docs from %s\n", nline, p)
 	}
 	return docs
 }
@@ -295,32 +295,40 @@ func docSplit(docs [][]string, holdout float64) (train, held [][]string) {
 }
 
 func main() {
-	novelCSV := flag.String("novel", "REDACTED-PATH", "novel CSV(s) — TRAIN")
-	evalCSV := flag.String("eval", "REDACTED-PATH", "separate-FILE held-out novel CSV(s)")
-	pud := flag.String("pud", "REDACTED-PATH", "UD_Thai-PUD conllu (TEST ONLY, never trained on)")
+	dialogueCSV := flag.String("dialogue", "", "dialogue-register CSV(s) — TRAIN (required)")
+	evalCSV := flag.String("eval", "", "separate-FILE held-out dialogue CSV(s)")
+	pud := flag.String("pud", "", "UD_Thai-PUD conllu (TEST ONLY, never trained on)")
 	col := flag.String("col", "text", "text column")
 	bits := flag.Int("bits", 20, "log2 weight-table size")
 	iters := flag.Int("iters", 12, "perceptron iterations")
 	holdout := flag.Float64("holdout", 0.15, "internal doc-disjoint held-out fraction")
-	out := flag.String("out", "sentence/charseg/data/charseg_model.tsv", "model output path")
+	out := flag.String("out", "sentence/charseg/data/charseg_model_dialogue.tsv", "model output path")
 	sweep := flag.Bool("sweep", false, "sweep weight-table size (bits) for quality/speed")
 	flag.Parse()
+
+	if *dialogueCSV == "" {
+		fmt.Fprintln(os.Stderr, "need -dialogue <csv[,csv...]>")
+		os.Exit(2)
+	}
 
 	seg, err := tokenize.NewDefault()
 	must(err)
 
-	trainDocs := readNovel(seg, *novelCSV, *col)
+	trainDocs := readDialogue(seg, *dialogueCSV, *col)
 	if len(trainDocs) == 0 {
-		fmt.Fprintln(os.Stderr, "no novel docs")
+		fmt.Fprintln(os.Stderr, "no dialogue docs")
 		os.Exit(1)
 	}
-	sepHeld := readNovel(seg, *evalCSV, *col) // fully separate file (disjoint)
+	var sepHeld [][]string
+	if *evalCSV != "" {
+		sepHeld = readDialogue(seg, *evalCSV, *col) // fully separate file (disjoint)
+	}
 
-	// ---- shipped model: trained on ALL of -novel; held-out numbers below use a
-	// fully separate file (novel.csv) and PUD (never trained on). ----
+	// ---- shipped model: trained on ALL of -dialogue; held-out numbers below use
+	// a fully separate file and PUD (never trained on). ----
 	model, totRune, totBnd := trainOn(trainDocs, *bits, *iters)
 	fmt.Printf("TRAIN (shipped): %d docs, %d runes, %d boundaries (%.2f%% of runes) from %s\n",
-		len(trainDocs), totRune, totBnd, 100*float64(totBnd)/float64(totRune), *novelCSV)
+		len(trainDocs), totRune, totBnd, 100*float64(totBnd)/float64(totRune), *dialogueCSV)
 
 	if *out != "" {
 		f, err := os.Create(*out)
@@ -339,7 +347,7 @@ func main() {
 			{"whitespace", sentence.Split},
 			{"heuristic", sentence.SplitHeuristic},
 			{"crf.Default", crf.Split},
-			{"crf.Novel", func(s string) []string { return crf.Novel().Split(s) }},
+			{"crf.Dialogue", func(s string) []string { return crf.Dialogue().Split(s) }},
 			{"charseg", charSplit},
 		}
 		fmt.Printf("\n=== %s (%d fields, %d gold boundaries) ===\n", title, len(es.fields), len(es.goldBreak))
@@ -350,21 +358,25 @@ func main() {
 		}
 	}
 
-	report("UD_Thai-PUD [TEST, out-of-domain]", buildEval(readPUD(*pud)), model.Split)
-	report("Novel SEPARATE-FILE held-out (novel.csv, matches shipped model)",
-		buildEval(flatten(sepHeld)), model.Split)
+	if *pud != "" {
+		report("UD_Thai-PUD [TEST, out-of-domain]", buildEval(readPUD(*pud)), model.Split)
+	}
+	if len(sepHeld) > 0 {
+		report("Dialogue SEPARATE-FILE held-out (matches shipped model)",
+			buildEval(flatten(sepHeld)), model.Split)
+	}
 
 	// ---- internal doc-disjoint held-out: separate model trained ONLY on the
 	// train split so the reported number never touched training. ----
 	inTrain, inHeld := docSplit(trainDocs, *holdout)
 	inModel, _, _ := trainOn(inTrain, *bits, *iters)
 	fmt.Printf("\n(internal split: train=%d docs, held-out=%d docs, doc-disjoint)", len(inTrain), len(inHeld))
-	report("Novel INTERNAL held-out (doc-disjoint, no-leak model)",
+	report("Dialogue INTERNAL held-out (doc-disjoint, no-leak model)",
 		buildEval(flatten(inHeld)), inModel.Split)
 
-	if *sweep {
+	if *sweep && len(sepHeld) > 0 && *pud != "" {
 		fmt.Printf("\n=== bits sweep (table size = 4*2^bits bytes; quality on separate-file + PUD) ===\n")
-		fmt.Printf("%-6s %10s %10s %10s %12s\n", "bits", "F1_novel", "F1_PUD", "model_KB", "us/Split")
+		fmt.Printf("%-6s %10s %10s %10s %12s\n", "bits", "F1_dialog", "F1_PUD", "model_KB", "us/Split")
 		sepEval := buildEval(flatten(sepHeld))
 		pudEval := buildEval(readPUD(*pud))
 		docs := sepEval.doc

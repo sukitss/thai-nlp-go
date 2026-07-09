@@ -346,8 +346,9 @@ with tiny models (~20–420 KB embedded) and no word tokenizer.
 import "github.com/sukitss/thai-nlp-go/sentence/charseg"
 
 charseg.Split("เขาพูดว่า “ไปกันเถอะ” แล้วเดินออกไป ฝนเริ่มตกลงมา")
-// charseg.Default() — permissive, recommended (also charseg.Split)
-// charseg.Novel()   — novel/dialogue-domain specialist, opt-in
+// charseg.Default()  — permissive, recommended (also charseg.Split)
+// charseg.Dialogue() — dialogue/quote-register specialist, opt-in
+// charseg.Formal()   — formal/academic/news specialist, opt-in (charseg.FormalSplit)
 // charseg.RecallLean(text) — recall-leaning operating point (+~0.035 macro-F1)
 // m.SplitTau(text, τ) / m.ScoreAt(r, i) — tune the operating point yourself
 ```
@@ -383,7 +384,7 @@ hand-annotated CC0 gold benchmark is released alongside the model.
 
 ## One call for mixed-language text
 
-For a translated novel or a company document that mixes Thai, Chinese, Japanese,
+For a translated passage or a company document that mixes Thai, Chinese, Japanese,
 Korean and English, `multi.Segment` does the whole job — normalize, detect each
 run's language, route it to the right tokenizer, return index-ready tokens — so
 you don't wire the routing yourself:
@@ -449,7 +450,7 @@ documented on the struct fields.
 offsets into the source — `input[c.Start:c.End] == c.Text` always holds,
 overlaps included — so every chunk stays citable and highlightable after
 retrieval. Splitting is hierarchical, tuned for Thai prose (no sentence-final
-punctuation; novels put one paragraph per line): paragraphs first (line
+punctuation; long-form prose often puts one paragraph per line): paragraphs first (line
 breaks), oversized paragraphs by sentence with whole sentences packed
 greedily, and only a single sentence that alone exceeds the budget is
 hard-cut at rune boundaries — never immediately before a Thai combining mark,

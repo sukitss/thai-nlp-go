@@ -189,7 +189,7 @@ func TestTiny(t *testing.T) {
 	}
 }
 
-func TestParagraphPerLineNovelStyle(t *testing.T) {
+func TestParagraphPerLineProseStyle(t *testing.T) {
 	lines := []string{
 		"บทที่ ๑ การเดินทางเริ่มต้น",
 		"เขาออกเดินทางตั้งแต่เช้าตรู่ อากาศยังเย็นอยู่",

@@ -1,25 +1,25 @@
-charseg_model.tsv — provenance and licensing
-=============================================
+charseg_model_dialogue.tsv — provenance and licensing
+=====================================================
 
 What it is
 ----------
 A character-level sentence-boundary classifier (averaged perceptron over hashed
-character n-gram + character-type features) for the NOVEL domain: translated
-Chinese/Japanese and Thai web novels. It is the "outside-the-box" fast
+character n-gram + character-type features) specialised for dialogue- and quote-
+heavy prose (conversational text, quoted speech). It is the fast char-level
 counterpart to the word-level CRF (sentence/crf): no word tokenizer, a single
 pass over characters, and a tiny hashed weight table.
 
-Exposed as the opt-in charseg.Novel() specialist. For general multi-domain text
-use the recommended default, charseg.Default() (the permissive clean model in
-charseg_model_clean.tsv); this novel model transfers poorly to formal prose.
+Exposed as the opt-in charseg.Dialogue() specialist. For general multi-domain
+text use the recommended default, charseg.Default() (the permissive clean model
+in charseg_model_clean.tsv); this dialogue model transfers poorly to formal prose.
 
 How it was made (recipe)
 ------------------------
 Weak supervision (self-labelled silver corpus), no external gold corpus — the
-same labelling as the CRF novel model, so the two are directly comparable:
+same labelling as the CRF dialogue model, so the two are directly comparable:
 
-  1. Source text: Thai novel chapters from our own novel platform — text we own.
-     No third-party corpus is used. (Trained on novels_real.csv.)
+  1. Source text: text we own (used with permission). No third-party corpus is
+     used.
   2. Silver labelling: tokenize a line with the default segmenter to find silver
      sentence boundaries from ORTHOGRAPHIC signals only — a token ending in a
      closing quote (” " » 」 』 ’) or terminal punctuation (. ! ? … 。 ！ ？), and
@@ -32,16 +32,16 @@ same labelling as the CRF novel model, so the two are directly comparable:
 Measured quality (held-out silver; see cmd/charsegtrain)
 --------------------------------------------------------
   - Internal doc-disjoint held-out (no-leak model): boundary-F1 0.9950
-      (P 0.9995 / R 0.9905), vs CRF-novel 0.9895, whitespace 0.3240.
-  - Fully separate FILE (novel.csv): boundary-F1 0.7733 (P 1.0000 / R 0.6304),
-      tying the CRF-novel model.
-  - UD_Thai-PUD (out-of-domain, never trained on): 0.0792 — like CRF-novel
-      (0.0799); both novel-trained models transfer poorly to formal PUD prose.
+      (P 0.9995 / R 0.9905), vs CRF-dialogue 0.9895, whitespace 0.3240.
+  - Fully separate held-out FILE: boundary-F1 0.7733 (P 1.0000 / R 0.6304),
+      tying the CRF-dialogue model.
+  - UD_Thai-PUD (out-of-domain, never trained on): 0.0792 — like CRF-dialogue
+      (0.0799); both dialogue-trained models transfer poorly to formal PUD prose.
 
 Speed (see BenchmarkEngines): ~25x faster than the CRF and needs no tokenizer.
 
 Licensing
 ---------
-Derived from novel text we own via self weak-supervision. The model stores
-aggregate hashed feature weights (statistical parameters, not reconstructable
-prose). Shippable under the project licence.
+Derived from text we own via self weak-supervision. The model stores aggregate
+hashed feature weights (statistical parameters, not reconstructable prose).
+Shippable under the project licence.

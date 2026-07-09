@@ -200,7 +200,7 @@ under-estimates.
 - **Constructors:** `NewMinHash(numHashes, seed)` / `NewLSH(bands, rows, seed)`;
   `NewSimHash(seed)`; `NewCountMin(w, d, seed)` / `NewCountMinParams(eps, delta,
   seed)`; shingles via `WordShingles` / `CharNGrams`.
-- **When:** dedup a large corpus (novel chapters, crawled docs), coarse-filter
+- **When:** dedup a large corpus (long documents, crawled docs), coarse-filter
   near-dups, or approximate DF when a full `vocab` is too big.
 - **Measured (real Thai near-dup set):** **MinHash+LSH dedup F1 0.989**
   (precision 0.978, recall 1.000) at 128 hashes, signatures ~30× smaller than the

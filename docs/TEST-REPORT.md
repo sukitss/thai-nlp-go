@@ -64,7 +64,7 @@ _Generated: 2026-07-06 00:32 UTC | commit: 0cc22ae | go1.26.3_
 | ✅ | `chunk` | TestOverlapNeverCrossesParagraphs | 0.00s |
 | ✅ | `chunk` | TestOverlapShrinksToFitNextSentence | 0.00s |
 | ✅ | `chunk` | TestOverlapSkippedWhenLastSentenceTooBig | 0.00s |
-| ✅ | `chunk` | TestParagraphPerLineNovelStyle | 0.00s |
+| ✅ | `chunk` | TestParagraphPerLineProseStyle | 0.00s |
 | ✅ | `chunk` | TestPropertyRandomDocs | 0.04s |
 | ✅ | `chunk` | TestPropertyRealCorpus | 0.07s |
 | ✅ | `chunk` | TestSplitWithCRFSentences | 0.01s |

@@ -15,7 +15,7 @@ import (
 //   - Wisesight social-media text (CC0)                     [realistic boundaries]
 //   - thaigov-v2 government news (Public Domain)            [formal-register negatives]
 //   - TLC (MIT) + Wikisource (Public Domain) literature     [formal/verse register]
-//   - own novel-platform text (thai-novel.com)             [dialogue/quote silver]
+//   - our own text, used with permission                    [dialogue/quote silver]
 //
 // It is trained from scratch: no CRF teacher, no ORCHID/TED/LST20, and no
 // ShareAlike text is used. See charseg_model_clean.NOTICE for full provenance,
@@ -36,7 +36,8 @@ var (
 // boundary-F1 and space-correct accuracy — leading on dialogue / social /
 // poetry / abbreviation-date cases and on a held-out hand-annotated CC0 gold
 // set. The word-level CRF sub-package (sentence/crf) remains stronger on formal
-// news / UD-style prose. For novel-heavy text see Novel().
+// news / UD-style prose; for that register see also the opt-in Formal() model.
+// For dialogue-heavy text see Dialogue().
 func Default() *Model {
 	defaultOnce.Do(func() {
 		m, err := LoadModel(strings.NewReader(defaultModelData))

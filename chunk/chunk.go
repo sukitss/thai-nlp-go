@@ -3,7 +3,7 @@
 // highlighted: input[Start:End] == Text always holds, including for overlaps.
 //
 // Splitting is hierarchical, tuned for Thai prose (no sentence-final
-// punctuation; novels put one paragraph per line):
+// punctuation; long-form prose often puts one paragraph per line):
 //
 //  1. Paragraphs — the input is cut at every line break ('\n', '\r' or
 //     "\r\n"; a single newline is a paragraph break) and each paragraph is

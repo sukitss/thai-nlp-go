@@ -1,13 +1,13 @@
 package main
 
-// Novel-domain weak supervision.
+// Dialogue-register weak supervision.
 //
-// We have no gold sentence-boundary corpus for the novel domain (translated
-// Chinese/Japanese + Thai web novels). Instead we derive a *silver* corpus from
-// the orthography of novel text we own (the TNV1 platform): dialogue quotation
-// marks and terminal punctuation are high-precision sentence-boundary signals,
-// whereas bare spaces in this domain are mostly intra-sentence clause separators
-// (the very ambiguity crfcut is meant to resolve). See -novel in main.go.
+// We have no gold sentence-boundary corpus for dialogue- and quote-heavy prose
+// (conversational text, quoted speech). Instead we derive a *silver* corpus from
+// the orthography of such text we own: dialogue quotation marks and terminal
+// punctuation are high-precision sentence-boundary signals, whereas bare spaces
+// in this register are mostly intra-sentence clause separators (the very
+// ambiguity crfcut is meant to resolve). See -dialogue in main.go.
 //
 // The labelling is purely orthographic (quotes + terminal punctuation), so it is
 // independent of the CRF's own lexical features (word / ender / starter n-grams);
@@ -96,18 +96,19 @@ func countE(labs []byte) int {
 	return n
 }
 
-// runNovel builds a silver corpus from novel CSV(s), splits it deterministically
-// into train / held-out, trains a CRF, and prints a before/after comparison
-// (whitespace baseline, embedded crfcut, retrained) on the held-out split.
-func readNovelSet(csvArg, col string) []crf.Example {
+// runDialogue builds a silver corpus from dialogue CSV(s), splits it
+// deterministically into train / held-out, trains a CRF, and prints a
+// before/after comparison (whitespace baseline, embedded crfcut, retrained) on
+// the held-out split.
+func readDialogueSet(csvArg, col string) []crf.Example {
 	var all []crf.Example
 	for _, p := range strings.Split(csvArg, ",") {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
-		docs := readNovelCSV(p, col)
-		fmt.Printf("novel: %d docs from %s\n", len(docs), p)
+		docs := readDialogueCSV(p, col)
+		fmt.Printf("dialogue: %d docs from %s\n", len(docs), p)
 		all = append(all, docs...)
 	}
 	return all
@@ -121,10 +122,10 @@ func statE(docs []crf.Example) (tok, e int) {
 	return
 }
 
-func runNovel(csvArg, evalArg, col string, holdout float64, iters int, out string) {
-	all := readNovelSet(csvArg, col)
+func runDialogue(csvArg, evalArg, col string, holdout float64, iters int, out string) {
+	all := readDialogueSet(csvArg, col)
 	if len(all) == 0 {
-		fmt.Fprintln(os.Stderr, "no novel documents")
+		fmt.Fprintln(os.Stderr, "no dialogue documents")
 		os.Exit(1)
 	}
 
@@ -132,7 +133,7 @@ func runNovel(csvArg, evalArg, col string, holdout float64, iters int, out strin
 	if evalArg != "" {
 		// Separate held-out file(s): cleanest generalization test (disjoint text).
 		train = all
-		test = readNovelSet(evalArg, col)
+		test = readDialogueSet(evalArg, col)
 	} else if holdout <= 0 {
 		train = all // train on everything (final shippable model; no eval)
 	} else {
@@ -174,11 +175,11 @@ func runNovel(csvArg, evalArg, col string, holdout float64, iters int, out strin
 	fmt.Printf("  trained     : %s\n", crf.Eval(model.Labels, test))
 }
 
-// readNovelCSV reads one CSV (with a header) and returns one silver Example per
+// readDialogueCSV reads one CSV (with a header) and returns one silver Example per
 // row, using the given text column (default: "text", else the first column).
 // Rows are tokenized with the default segmenter (whitespace kept) and labelled
 // by silverLabels. Empty / boundary-less rows are skipped.
-func readNovelCSV(path, col string) []crf.Example {
+func readDialogueCSV(path, col string) []crf.Example {
 	f, err := os.Open(path)
 	must(err)
 	defer f.Close()

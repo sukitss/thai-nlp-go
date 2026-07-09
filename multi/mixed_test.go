@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// mixedPassage is a realistic translated-novel-style passage: Thai prose with
+// mixedPassage is a realistic translated-prose-style passage: Thai prose with
 // Chinese and Japanese names/quotes, English words, Thai and Arabic digits and
 // emoji. The expected tokens are pinned from reviewed multi.Segment output —
 // this is a change-detector golden: any routing/normalize/tokenizer change
