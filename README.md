@@ -509,6 +509,71 @@ bounds, duplicate terms, trailing bytes) and returns an error on corrupt input
 instead of panicking. Where the snapshot lives and how it synchronizes across
 processes is deliberately your policy — the package is the mechanism.
 
+## Discovering the words a dictionary does not have
+
+A dictionary tokenizer is only as good as its dictionary. Give `newmm` a corpus
+full of coined names — characters in a novel, product codenames, a company's own
+jargon — and it does the only thing it can: it cuts them into whatever known
+words the spelling happens to contain. `ก็อบลิน` becomes `ก็ · อบ · ลิน`, and
+then a search for the name matches nothing, because the name is not what got
+indexed.
+
+`discover` reads a corpus and proposes the terms it contains, so that the
+dictionary can be extended from the text it will actually be used on. It reads
+no dictionary of its own for that decision — four measurements do the work:
+
+- **Frequency.** A term is used more than once.
+- **Branching entropy.** A real term takes varied neighbours; a fragment is
+  stuck to whatever completes it.
+- **Cohesion (PMI).** A run of ordinary words earns a place only by clinging
+  together far harder than chance.
+- **Spelling.** Whatever the caller says can be a word at all. For Thai that is
+  pronounceability, measured with TCC: a run of bare consonant clusters carries
+  no vowel and cannot be read aloud.
+
+```go
+terms := auto.Terms(docs, auto.Options{})   // any mix of scripts
+for _, t := range terms {
+    fmt.Println(t.Text, t.Count, t.PMI, t.Unknown)
+}
+```
+
+`auto` routes every decision by the script a candidate is written in — which
+tokenizer cuts it, whether a dictionary can be consulted about it, what counts
+as a well-formed word, and how tokens join back into text. That last one is not
+cosmetic: Thai writes no word boundary and English does, so joining English
+tokens the Thai way produces `machinelearning`, which matches nothing. Use
+`discover` with `discover/thai` directly when the script is known in advance and
+you would rather not link every tokenizer.
+
+Two behaviours are worth knowing before you use the output:
+
+- **A word the dictionary cannot name gets a lower bar.** Entropy needs a corpus
+  large enough for variety to exist, and a rare borrowing can be real while
+  keeping the same company every time it is used. Measured on a novel:
+  `ทานูกิ` occurs 19 times and is followed by the same word every time.
+- **Ordinary words are peeled off a term, and parts of a name are not.** The
+  difference is whether the wrapping word has a life of its own in the corpus.
+  `หุ้ม` occurs 28 times, 19 of them wrapping `ทานูกิ`, so the name is reported
+  and the phrase is not; `เซียว` occurs 209 times and 201 of them are inside
+  `เซียวหนิงเอ๋อร์`, so that name is reported whole.
+
+What it does not do: a name spelled entirely out of common words is invisible to
+cohesion, because it genuinely is two common words as far as the corpus can
+tell. Proposals are meant to be reviewed, not applied blind — on 5,927
+documents of Thai prose the package proposes 390 terms, most of them names and
+domain vocabulary, and some of them ordinary phrases.
+
+Feed what survives review back into the tokenizer:
+
+```go
+overlay := dict.NewTrie()
+for _, t := range approved {
+    overlay.Add(t.Text)
+}
+seg := tokenize.New(tokenize.NewOverlayDict(base, overlay))
+```
+
 ## Multilingual routing (manual)
 
 Real corpora mix scripts (Thai + English + Chinese + Korean …). `script.SplitByScript`
