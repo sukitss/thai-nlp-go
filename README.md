@@ -548,10 +548,18 @@ you would rather not link every tokenizer.
 
 Two behaviours are worth knowing before you use the output:
 
-- **A word the dictionary cannot name gets a lower bar.** Entropy needs a corpus
-  large enough for variety to exist, and a rare borrowing can be real while
-  keeping the same company every time it is used. Measured on a novel:
-  `ทานูกิ` occurs 19 times and is followed by the same word every time.
+- **A word the dictionary cannot name gets a lower bar, not a free pass.**
+  Entropy needs a corpus large enough for variety to exist, and a rare borrowing
+  can be real while keeping the same company every time it is used — measured on
+  a novel, `ทานูกิ` occurs 19 times and is followed by the same word in all 19.
+  It still has to cohere: the debris a mis-segmented name leaves behind is
+  unknown too, and scores 1.4-4.0 where real borrowings score 8.9-24.5.
+- **An edge decided by one neighbour is not an edge the corpus found.** When
+  ≥90% of a candidate's occurrences have the same neighbour on one side, that
+  side counts as a boundary only if the neighbour is an ordinary word. `ทานูกิ`
+  is always followed by `หุ้ม`, a word, so the unit is complete; `กิหุ้มเกราะ`
+  is preceded by `นู`, which is not a word, so it starts mid-name and is
+  rejected.
 - **Ordinary words are peeled off a term, and parts of a name are not.** The
   difference is whether the wrapping word has a life of its own in the corpus.
   `หุ้ม` occurs 28 times, 19 of them wrapping `ทานูกิ`, so the name is reported
@@ -560,9 +568,23 @@ Two behaviours are worth knowing before you use the output:
 
 What it does not do: a name spelled entirely out of common words is invisible to
 cohesion, because it genuinely is two common words as far as the corpus can
-tell. Proposals are meant to be reviewed, not applied blind — on 5,927
-documents of Thai prose the package proposes 390 terms, most of them names and
-domain vocabulary, and some of them ordinary phrases.
+tell. Proposals are meant to be reviewed, not applied blind — on 5,927 documents
+of Thai prose the package proposes 499 terms, most of them names and domain
+vocabulary, and some of them ordinary phrases.
+
+Not every proposal belongs in a dictionary, either. `ก็อบลิน` does: today it
+cuts into ก็·อบ·ลิ·น, which are not words. `ผู้ใช้ภูติ` does not: it already
+cuts into ผู้ใช้·ภูติ, both real, and adding it would make longest-match take
+the pair whole so that a search for `ภูติ` stops matching it. Add what is broken
+today; leave the rest to phrase matching in the index.
+
+Two measurements ship with the package. On an invented corpus whose vocabulary
+is known exactly (`discover/thai/testdata`), precision and recall are both 1.00.
+On a held-out evaluation — 40 real words removed from the dictionary, then
+recovered from the repo's own tokenizer stress corpus — recall is 0.42 overall
+and 0.59 for words of four characters or more. Read the second as a floor: a
+held-out dictionary word usually breaks into other dictionary words and gets no
+help from the dictionary's silence, while a coined name breaks into debris.
 
 Feed what survives review back into the tokenizer:
 

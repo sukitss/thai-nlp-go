@@ -20,6 +20,8 @@
 //	chunk     offset-true hierarchical chunking for RAG ingestion
 //	translit  name-variant matching (MetaSound/Udom83/LK82/CompleteSoundex keys,
 //	          edit distance, SoundIndex)
+//	discover  propose the terms a corpus contains and the dictionary lacks
+//	          (+ discover/thai for Thai, discover/auto to route by script)
 //
 // Design rule #1: performance and memory. Components share a single
 // memory-mapped dictionary via dict.Default rather than each loading its own —

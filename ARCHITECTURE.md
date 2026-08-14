@@ -11,6 +11,10 @@ thai-nlp-go/
 │   ├── dict.go        Prefixer interface + Default() shared instance + embed
 │   └── data/          words_th.txt (source) + words_th.fdt (compiled)
 ├── tokenize/     word segmentation (newmm port) + char n-gram
+├── discover/     new-word discovery: propose terms a corpus has and dict lacks
+│   ├── discover.go    statistics only (frequency, entropy, PMI) — imports math
+│   ├── thai/          the dictionary + TCC pronounceability
+│   └── auto/          routes tokenizer, dictionary, spelling and joining by script
 ├── normalize/    (planned)  Unicode/Thai normalization
 ├── stopwords/    (planned)  stop-word filtering
 ├── sentence/     (planned)  sentence boundary detection
@@ -44,6 +48,20 @@ Driven by **performance and memory**:
   module: never build your own copy of the base dictionary when you can share it.
 - `Prefixer` is the one-method interface every dictionary satisfies, so custom or
   overlaid dictionaries drop in anywhere.
+
+## Language rules are opt-in (`discover`)
+
+`discover` is the worked example of a rule the module now applies generally:
+**a package that reads language keeps that knowledge in a sub-package.** The
+core scores candidates with statistics alone and imports nothing but `math`;
+`discover/thai` supplies the dictionary and the orthographic test; `discover/auto`
+picks between them per candidate. A caller working in English links neither the
+2.8 MB Thai dictionary nor the TCC tables.
+
+The same split is why `auto` can be correct at all. The rules that differ by
+script are not only which words are known — they include how tokens rejoin into
+a term. Thai writes no word boundary and English does, so a joiner that is right
+for one produces `machinelearning` for the other, and a term that never matches.
 
 ## Conventions for new packages
 
