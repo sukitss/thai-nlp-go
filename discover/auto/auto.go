@@ -96,7 +96,25 @@ func routed() discover.Options {
 			return th.Known != nil && th.Known(token)
 		},
 		Valid: func(text string) bool {
-			if isThai(text) {
+			// A term does not straddle a script boundary. "ระบบAI" is two
+			// words that happen to be written without a space between them,
+			// and entering it in a dictionary as one is actively harmful: a
+			// longest-match tokenizer would then take the pair whole, and a
+			// search for "AI" would stop finding it. The boundary between
+			// scripts is a word boundary even when no space is written.
+			th, other := false, false
+			for _, r := range text {
+				switch {
+				case isThaiRune(r):
+					th = true
+				case unicode.IsLetter(r):
+					other = true
+				}
+			}
+			if th && other {
+				return false
+			}
+			if th {
 				return thai.Pronounceable(text)
 			}
 			return spellsAWord(text)

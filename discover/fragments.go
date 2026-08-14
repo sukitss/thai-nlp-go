@@ -41,8 +41,9 @@ func dropFragments(in []Term, unigram map[string]int, o Options) []Term {
 		return in
 	}
 	out := in[:0]
+	var parents []Term
 	for i, t := range in {
-		inside := 0
+		parents = parents[:0]
 		for j, other := range in {
 			if i == j {
 				continue
@@ -59,7 +60,25 @@ func dropFragments(in []Term, unigram map[string]int, o Options) []Term {
 				// explains it.
 				continue
 			}
-			inside += other.Count
+			parents = append(parents, other)
+		}
+		// Count each occurrence once. Longer candidates nest — every
+		// occurrence of "ที่จะมา" is also an occurrence of "ที่จะ" — so adding
+		// up every longer candidate double-counts, and for a short common word
+		// with many extensions it can exceed the word's own count and condemn
+		// it. Only the outermost ones describe distinct occurrences.
+		inside := 0
+		for a, p := range parents {
+			nested := false
+			for b, q := range parents {
+				if a != b && indexTokens(q.Tokens, p.Tokens) >= 0 {
+					nested = true
+					break
+				}
+			}
+			if !nested {
+				inside += p.Count
+			}
 		}
 		if inside > 0 && float64(t.Count-inside) < fragmentShare*float64(t.Count) {
 			continue
