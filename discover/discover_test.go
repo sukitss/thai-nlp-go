@@ -74,7 +74,9 @@ func TestUnknownPiecesEarnALowerBarOnOneSide(t *testing.T) {
 	// MaxRun 2 keeps the corpus from also proposing "zx qq arrived", which
 	// would swallow this candidate — that is the affix rule's business, tested
 	// on its own below.
-	oneEdgeOpts := discover.Options{Join: joinSpace, Known: known, MaxRun: 2}
+	// MinPMIUnknown is lowered because these corpora are a few dozen sentences
+	// and PMI scales with how rare a pair is; the default is set for prose.
+	oneEdgeOpts := discover.Options{Join: joinSpace, Known: known, MaxRun: 2, MinPMIUnknown: 0.01}
 	got, ok := find(discover.TermsFromSlices(oneEdge, oneEdgeOpts), "zx qq")
 	if !ok {
 		t.Fatal("an unknown pair with one free edge should qualify")
@@ -110,7 +112,8 @@ func TestFragmentsGoNotTheirParents(t *testing.T) {
 		)
 	}
 	terms := discover.TermsFromSlices(docs, discover.Options{
-		Join: joinSpace, Known: func(s string) bool { return s != "gob" && s != "lin" && s != "kit" },
+		Join: joinSpace, MinPMIUnknown: 0.01,
+		Known: func(s string) bool { return s != "gob" && s != "lin" && s != "kit" },
 	})
 	if _, ok := find(terms, "gob lin"); !ok {
 		t.Errorf("the full name must survive:\n%v", terms)
@@ -130,7 +133,7 @@ func TestValidCanVetoOnLanguageGrounds(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		docs = append(docs, words("aa bb cc"), words("xx aa bb yy"), words("zz aa bb qq"))
 	}
-	opts := discover.Options{Join: joinSpace}
+	opts := discover.Options{Join: joinSpace, MinPMIUnknown: 0.01}
 	if _, ok := find(discover.TermsFromSlices(docs, opts), "aa bb"); !ok {
 		t.Fatal("precondition: the pair should qualify without a language rule")
 	}
@@ -157,7 +160,7 @@ func TestTermsCarryTheirEvidence(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		docs = append(docs, words("alpha beta one"), words("two alpha beta three"), words("four alpha beta"))
 	}
-	terms := discover.TermsFromSlices(docs, discover.Options{Join: joinSpace})
+	terms := discover.TermsFromSlices(docs, discover.Options{Join: joinSpace, MinPMIUnknown: 0.01})
 	got, ok := find(terms, "alpha beta")
 	if !ok {
 		t.Fatalf("expected the pair, got %v", terms)
@@ -190,7 +193,7 @@ func TestAffixMustLiveOutsideTheTermItWraps(t *testing.T) {
 		}
 		return docs
 	}
-	opts := discover.Options{Join: joinSpace, Known: known, Affix: known}
+	opts := discover.Options{Join: joinSpace, Known: known, Affix: known, MinPMIUnknown: 0.01}
 
 	// "armoured" is a word of its own here: it describes the creature.
 	free := discover.TermsFromSlices(build(40), opts)
@@ -208,7 +211,7 @@ func TestAffixMustLiveOutsideTheTermItWraps(t *testing.T) {
 	}
 
 	// Without an Affix function a caller gets the conservative reading.
-	plain := discover.Options{Join: joinSpace, Known: known}
+	plain := discover.Options{Join: joinSpace, Known: known, MinPMIUnknown: 0.01}
 	if _, ok := find(discover.TermsFromSlices(build(40), plain), "zx qq"); ok {
 		t.Error("with no Affix rule, the longer candidate must win")
 	}

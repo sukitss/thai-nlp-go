@@ -62,10 +62,16 @@ type Options struct {
 	// Thai novel corpus, ordinary phrases scored 1.3-5.7 and proper names
 	// 13-24.6, so 9 sat comfortably between.
 	MinPMI float64
+	// MinPMIUnknown is the cohesion floor for candidates containing a token the
+	// dictionary cannot name. It is far below MinPMI — the dictionary's silence
+	// is most of the evidence for those — but not zero, because the debris a
+	// mis-segmented name leaves behind is unknown too: "เฟียที่" scores 2.4 and
+	// is the tail of a name plus a preposition. Default DefaultMinPMIUnknown.
+	MinPMIUnknown float64
 	// MaxRun is the longest run of tokens considered. Default DefaultMaxRun.
 	MaxRun int
 	// Known reports whether a token is already a dictionary word. When set, a
-	// candidate must contain at least one unknown token OR clear MinPMI — which
+	// candidate need only clear MinPMIUnknown rather than MinPMI — which
 	// is what stops "of the" and "ของผม" from being reported as discoveries.
 	// nil means nothing is known, and every run is a candidate.
 	Known func(token string) bool
@@ -121,7 +127,12 @@ const (
 	// what keeps this from depending on how common the term itself is.
 	DefaultAffixFreeShare = 0.25
 	DefaultMinPMI         = 9.0
-	DefaultMaxRun         = 4
+	// DefaultMinPMIUnknown asks an unknown candidate to be some 32x likelier
+	// than chance. Measured on a novel corpus, that is the gap between real
+	// borrowings (ทานูกิ 24.5, ก็อบลิน 21.9, เสิ่นซิ่ว 8.9) and the debris
+	// around a mis-segmented name (เฟียที่ 2.4, เฟียก็ 1.4, กับเฟีย 4.0).
+	DefaultMinPMIUnknown = 5.0
+	DefaultMaxRun        = 4
 )
 
 // join returns the configured joiner, or concatenation — the Thai default,
@@ -148,6 +159,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.MinPMI <= 0 {
 		o.MinPMI = DefaultMinPMI
+	}
+	if o.MinPMIUnknown <= 0 {
+		o.MinPMIUnknown = DefaultMinPMIUnknown
 	}
 	if o.MaxRun <= 0 {
 		o.MaxRun = DefaultMaxRun
@@ -308,13 +322,27 @@ func judge(text string, c *candidate, unigram map[string]int, total int, o Optio
 		if free < o.MinEntropyUnknown {
 			return Term{}, false
 		}
+		// An edge with exactly one neighbour every time is not a boundary the
+		// corpus found; it is one this candidate stopped short of. Whether that
+		// matters depends on what the neighbour is. "ทานูกิ" is always followed
+		// by "หุ้ม", an ordinary word — the unit is complete and extending it
+		// would only produce a phrase. "นูกิหุ้มเกราะ" is always preceded by
+		// "ทา", which is not a word at all — the unit starts in the middle of a
+		// name, and extending it is exactly what it needs.
+		if !edgeSettled(c.left, unigram, o) || !edgeSettled(c.right, unigram, o) {
+			return Term{}, false
+		}
 	} else if stuck < o.MinEntropy {
 		return Term{}, false
 	}
 	pmi := cohesion(c, unigram, total)
 	// A run made entirely of known words is usually just a phrase; it earns a
 	// place only by clinging together far harder than chance.
-	if !c.unknown && pmi < o.MinPMI {
+	floor := o.MinPMI
+	if c.unknown {
+		floor = o.MinPMIUnknown
+	}
+	if pmi < floor {
 		return Term{}, false
 	}
 	return Term{
@@ -343,6 +371,35 @@ func appendConcat(dst []byte, tokens []string) []byte {
 		dst = append(dst, t...)
 	}
 	return dst
+}
+
+// edgeDominance is the share of one neighbour that makes an edge look decided
+// in advance rather than found. Nine in ten leaves room for a name that appears
+// once or twice outside its usual phrase — measured: "กิหุ้มเกราะ" is preceded
+// by "นู" in 19 of its 21 occurrences, and it is a fragment of ทานูกิหุ้มเกราะ.
+const edgeDominance = 0.9
+
+// edgeSettled reports whether an edge is a boundary the corpus agrees on.
+//
+// An edge with varied neighbours is settled by definition. One dominated by a
+// single neighbour is settled only when that neighbour is ordinary vocabulary,
+// which means the candidate ends where a word ends rather than where a longer
+// name was cut in half.
+func edgeSettled(neighbours map[string]int, unigram map[string]int, o Options) bool {
+	if o.Affix == nil || len(neighbours) == 0 {
+		return true
+	}
+	total, top, topToken := 0, 0, ""
+	for token, n := range neighbours {
+		total += n
+		if n > top {
+			top, topToken = n, token
+		}
+	}
+	if float64(top) < edgeDominance*float64(total) {
+		return true
+	}
+	return allAffix([]string{topToken}, unigram, top, o)
 }
 
 // entropy is Shannon entropy over the neighbour distribution, in bits.

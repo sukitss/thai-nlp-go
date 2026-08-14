@@ -41,9 +41,8 @@ func dropFragments(in []Term, unigram map[string]int, o Options) []Term {
 		return in
 	}
 	out := in[:0]
-	var parents []Term
 	for i, t := range in {
-		parents = parents[:0]
+		inside := 0
 		for j, other := range in {
 			if i == j {
 				continue
@@ -60,26 +59,23 @@ func dropFragments(in []Term, unigram map[string]int, o Options) []Term {
 				// explains it.
 				continue
 			}
-			parents = append(parents, other)
+			inside += other.Count
 		}
-		// Count each occurrence once. Longer candidates nest — every
-		// occurrence of "ที่จะมา" is also an occurrence of "ที่จะ" — so adding
-		// up every longer candidate double-counts, and for a short common word
-		// with many extensions it can exceed the word's own count and condemn
-		// it. Only the outermost ones describe distinct occurrences.
-		inside := 0
-		for a, p := range parents {
-			nested := false
-			for b, q := range parents {
-				if a != b && indexTokens(q.Tokens, p.Tokens) >= 0 {
-					nested = true
-					break
-				}
-			}
-			if !nested {
-				inside += p.Count
-			}
-		}
+		// This sum over-counts, and deliberately so. Longer candidates nest and
+		// overlap — one occurrence of "ที่" inside "ในที่จะ" is counted by both
+		// "ในที่" and "ที่จะ" — so `inside` is an upper bound on how much of
+		// this candidate longer ones explain, not the exact figure. Counting
+		// exactly would take a second pass over the corpus with positions.
+		//
+		// The bias runs the safe way. Over-counting makes this test stricter,
+		// and the thing it is defending against is debris: "หนิงเอ๋อร์" (205)
+		// left over from "เซียวหนิงเอ๋อร์" (201), which reads as a name, passes
+		// every other test, and would poison a tokenizer dictionary. It was
+		// tried the exact way, counting only outermost parents, and the debris
+		// came straight back — a name has several extensions and the outermost
+		// ones are individually small. What the strictness costs is short
+		// common words with many extensions, which have no edges to find in the
+		// first place (see the holdout benchmark in discover/thai).
 		if inside > 0 && float64(t.Count-inside) < fragmentShare*float64(t.Count) {
 			continue
 		}
@@ -88,40 +84,52 @@ func dropFragments(in []Term, unigram map[string]int, o Options) []Term {
 	return dropWrappers(out, unigram, o)
 }
 
-// dropWrappers removes a term that is another surviving term plus ordinary
-// words — "คุณเอลินา" once "เอลินา" is known, "ทานูกิหุ้มเกราะ" once "ทานูกิ"
-// is.
+// dropWrappers removes a term that is a core wrapped in ordinary words:
+// "คุณเอลินา" around "เอลินา", "ทานูกิหุ้มเกราะ" around "ทานูกิ".
 //
 // Keeping both is worse than useless for the usual purpose of this package,
-// which is to feed a tokenizer's dictionary: a longest-match tokenizer would
-// take the longer entry every time, and then a search for the name itself finds
-// nothing. The shorter one is also the thing a reader would look up.
+// which is to feed a tokenizer's dictionary: longest-match would take the
+// longer entry every time, and a search for the name itself would find nothing.
+// The shorter one is also the thing a reader would look up.
+//
+// Stripping stops when fewer than two tokens are left, so a term made entirely
+// of ordinary words that earned its place by cohesion — "กระต่ายเขาแหลม" — is
+// never taken apart.
 func dropWrappers(in []Term, unigram map[string]int, o Options) []Term {
 	if o.Affix == nil || len(in) < 2 {
 		return in
 	}
+	have := make(map[string]bool, len(in))
+	for _, t := range in {
+		have[t.Text] = true
+	}
 	out := in[:0]
-	for i, t := range in {
-		wrapper := false
-		for j, inner := range in {
-			if i == j || len(inner.Tokens) >= len(t.Tokens) {
-				continue
-			}
-			at := indexTokens(t.Tokens, inner.Tokens)
-			if at < 0 {
-				continue
-			}
-			if allAffix(t.Tokens[:at], unigram, t.Count, o) &&
-				allAffix(t.Tokens[at+len(inner.Tokens):], unigram, t.Count, o) {
-				wrapper = true
-				break
-			}
-		}
-		if !wrapper {
+	for _, t := range in {
+		core, _ := stripAffixes(t, unigram, o)
+		if core == "" || !have[core] {
 			out = append(out, t)
 		}
 	}
 	return out
+}
+
+// stripAffixes peels ordinary words off both ends of a term and returns what is
+// left, plus a signature of what was removed. It returns "" when nothing was
+// removed or when too little is left to be a term.
+func stripAffixes(t Term, unigram map[string]int, o Options) (core, wrap string) {
+	lo, hi := 0, len(t.Tokens)
+	for lo < hi && allAffix(t.Tokens[lo:lo+1], unigram, t.Count, o) {
+		wrap += t.Tokens[lo] + "\x00"
+		lo++
+	}
+	for hi > lo && allAffix(t.Tokens[hi-1:hi], unigram, t.Count, o) {
+		wrap += "\x00" + t.Tokens[hi-1]
+		hi--
+	}
+	if wrap == "" || hi-lo < 2 {
+		return "", ""
+	}
+	return o.join()(t.Tokens[lo:hi]), wrap
 }
 
 // indexTokens returns where sub starts inside tokens as a contiguous run, or -1.
